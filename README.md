@@ -1,36 +1,145 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Excel Upload Application
 
-## Getting Started
+A Next.js application for uploading Excel files (.xlsx) and managing data with image tagging functionality.
 
-First, run the development server:
+## Features
 
+- **File Upload**: Upload .xlsx files with automatic processing
+- **Sheet Navigation**: Dropdown to switch between different Excel sheets
+- **Data Table**: View Human and AI columns with checkbox selection
+- **Image Sidebar**: Tag images with predefined categories
+- **MongoDB Integration**: Store and retrieve Excel data
+- **Modern UI**: Responsive design with Tailwind CSS
+
+## Prerequisites
+
+- Node.js 18+ 
+- MongoDB (local or cloud instance)
+- npm or yarn
+
+## Installation
+
+1. Clone the repository and navigate to the project directory:
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cd excel-upload-app
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. Install dependencies:
+```bash
+npm install
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+3. Set up environment variables:
+```bash
+# Create .env.local file with your MongoDB connection string
+MONGODB_URI=mongodb://localhost:27017/excel-upload-app
+NEXTAUTH_SECRET=your-secret-key-here
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+4. Start MongoDB (if running locally):
+```bash
+# On macOS with Homebrew
+brew services start mongodb-community
 
-## Learn More
+# Or start manually
+mongod
+```
 
-To learn more about Next.js, take a look at the following resources:
+5. Run the development server:
+```bash
+npm run dev
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+6. Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Usage
 
-## Deploy on Vercel
+1. **Upload Excel File**: 
+   - Navigate to the upload page
+   - Select a .xlsx file with Human and AI columns
+   - Click "Upload File"
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+2. **View Data**:
+   - After upload, you'll be redirected to the dashboard
+   - Use the dropdown in the navbar to switch between sheets
+   - View the data table with Human and AI columns
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+3. **Select and Tag**:
+   - Check the boxes next to rows you want to tag
+   - The image sidebar will appear on the right
+   - Select appropriate tags for each image:
+     - Blurry
+     - Low-light
+     - Body part
+     - Blends in
+     - Unidentifiable to taxonomix level by human ground-truth
+
+## File Structure
+
+```
+src/
+├── app/
+│   ├── api/
+│   │   ├── upload/route.ts          # File upload endpoint
+│   │   ├── data/[id]/route.ts       # Data CRUD operations
+│   │   └── sheets/[filename]/route.ts # Sheet listing
+│   ├── dashboard/[id]/page.tsx      # Main dashboard
+│   ├── upload/page.tsx              # Upload page
+│   └── page.tsx                     # Home page (redirects to upload)
+├── lib/
+│   └── mongodb.ts                   # Database connection
+├── models/
+│   └── ExcelData.ts                 # MongoDB schema
+└── types/
+    └── global.d.ts                  # TypeScript declarations
+```
+
+## API Endpoints
+
+- `POST /api/upload` - Upload Excel file
+- `GET /api/data/[id]` - Get data by ID
+- `PUT /api/data/[id]` - Update data
+- `GET /api/sheets/[filename]` - Get all sheets for a file
+
+## Technologies Used
+
+- **Next.js 14** - React framework with App Router
+- **TypeScript** - Type safety
+- **Tailwind CSS** - Styling
+- **MongoDB** - Database
+- **Mongoose** - ODM for MongoDB
+- **XLSX** - Excel file processing
+- **Headless UI** - Accessible UI components
+- **Lucide React** - Icons
+
+## Excel File Requirements
+
+Your Excel file should contain:
+- At least one sheet with "Human" and "AI" columns (case-insensitive)
+- Data in the rows below the headers
+- .xlsx format
+
+## Development
+
+To run in development mode:
+```bash
+npm run dev
+```
+
+To build for production:
+```bash
+npm run build
+npm start
+```
+
+## Troubleshooting
+
+1. **MongoDB Connection Issues**: Ensure MongoDB is running and the connection string in `.env.local` is correct.
+
+2. **File Upload Errors**: Check that your Excel file has "Human" and "AI" columns and is in .xlsx format.
+
+3. **Build Errors**: Make sure all dependencies are installed with `npm install`.
+
+## License
+
+This project is open source and available under the [MIT License](LICENSE).
