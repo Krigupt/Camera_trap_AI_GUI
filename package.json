@@ -9,7 +9,6 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@headlessui/react": "^2.2.7",
     "@types/multer": "^2.0.0",
     "dotenv": "^17.2.2",
     "lucide-react": "^0.542.0",
@@ -29,6 +28,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/xlsx": "^0.0.35",
     "eslint": "^9",
     "eslint-config-next": "15.5.2",
     "tailwindcss": "^4",

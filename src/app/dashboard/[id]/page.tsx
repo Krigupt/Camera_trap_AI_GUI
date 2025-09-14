@@ -2,9 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams } from 'next/navigation';
-import { ChevronDownIcon, ImageIcon, TagIcon } from 'lucide-react';
-import { Menu, Transition } from '@headlessui/react';
-import { Fragment } from 'react';
+import { ImageIcon, TagIcon, DownloadIcon } from 'lucide-react';
 
 interface ExcelData {
   _id: string;
@@ -17,7 +15,9 @@ interface ExcelData {
     imagePaths?: string[];
     tags?: string[];
     isSelected?: boolean;
+    imageTags?: { [imagePath: string]: string[] }; // Individual image tags
   }>;
+  globalImageTags?: { [imagePath: string]: string[] }; // Global tags across all sheets
 }
 
 interface Sheet {
@@ -45,10 +45,12 @@ const getImagePaths = (row: ExcelData['data'][0]): string[] => {
 };
 
 // Navbar component to avoid duplication
-const Navbar = ({ selectedSheet, sheets, onSheetChange }: {
+const Navbar = ({ selectedSheet, sheets, onSheetChange, onExport, isExporting }: {
   selectedSheet: string;
   sheets: Sheet[];
   onSheetChange: (sheetId: string) => void;
+  onExport: () => void;
+  isExporting: boolean;
 }) => (
   <nav className="bg-white shadow-sm border-b">
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -58,41 +60,36 @@ const Navbar = ({ selectedSheet, sheets, onSheetChange }: {
         </div>
         
         <div className="flex items-center space-x-4">
-          <Menu as="div" className="relative">
-            <Menu.Button className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">
-              <span>{selectedSheet || 'Select Taxonomic Level'}</span>
-              <ChevronDownIcon className="w-4 h-4" />
-            </Menu.Button>
-            
-            <Transition
-              as={Fragment}
-              enter="transition ease-out duration-100"
-              enterFrom="transform opacity-0 scale-95"
-              enterTo="transform opacity-100 scale-100"
-              leave="transition ease-in duration-75"
-              leaveFrom="transform opacity-100 scale-100"
-              leaveTo="transform opacity-0 scale-95"
-            >
-              <Menu.Items className="absolute right-0 mt-2 w-56 origin-top-right bg-white rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none z-10">
-                <div className="py-1">
-                  {sheets.map((sheet) => (
-                    <Menu.Item key={sheet.id}>
-                      {({ active }) => (
-                        <button
-                          onClick={() => onSheetChange(sheet.id)}
-                          className={`${
-                            active ? 'bg-gray-100' : ''
-                          } block w-full text-left px-4 py-2 text-sm text-gray-700`}
-                        >
-                          {sheet.sheetName}
-                        </button>
-                      )}
-                    </Menu.Item>
-                  ))}
-                </div>
-              </Menu.Items>
-            </Transition>
-          </Menu>
+          <button
+            onClick={onExport}
+            disabled={isExporting}
+            className="flex items-center space-x-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+          >
+            {isExporting ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                <span>Exporting...</span>
+              </>
+            ) : (
+              <>
+                <DownloadIcon className="w-4 h-4" />
+                <span>Export Tagged Data</span>
+              </>
+            )}
+          </button>
+          
+          <select 
+            value={selectedSheet || ''} 
+            onChange={(e) => onSheetChange(e.target.value)}
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors border-none outline-none cursor-pointer"
+          >
+            <option value="" disabled>Select Taxonomic Level</option>
+            {sheets.map((sheet) => (
+              <option key={sheet.id} value={sheet.id} className="bg-white text-black">
+                {sheet.sheetName}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
     </div>
@@ -194,12 +191,34 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [showImageSidebar, setShowImageSidebar] = useState(false);
   const [currentImageIndex, setCurrentImageIndex] = useState<number>(0);
+  const [isExporting, setIsExporting] = useState(false);
+  const [globalImageTags, setGlobalImageTags] = useState<{ [imagePath: string]: string[] }>({});
+
+  // Fetch global image tags
+  const fetchGlobalTags = useCallback(async (filename: string) => {
+    try {
+      console.log('Fetching global tags for filename:', filename);
+      const response = await fetch(`/api/global-tags?filename=${encodeURIComponent(filename)}`);
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Fetched global tags:', data.globalImageTags);
+        setGlobalImageTags(data.globalImageTags || {});
+      } else {
+        console.error('Failed to fetch global tags:', response.status);
+      }
+    } catch (error) {
+      console.error('Error fetching global tags:', error);
+    }
+  }, []);
 
   // Fetch initial data and sheets
   const fetchData = useCallback(async () => {
     try {
       const response = await fetch(`/api/data/${params.id}`);
       const data = await response.json();
+      
+      // Fetch global tags
+      await fetchGlobalTags(data.filename);
       
       const encodedFilename = encodeURIComponent(data.filename);
       const sheetsResponse = await fetch(`/api/sheets/${encodedFilename}`);
@@ -218,7 +237,7 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [params.id]);
+  }, [params.id, fetchGlobalTags]);
 
   // Handle sheet change
   const handleSheetChange = useCallback(async (sheetId: string) => {
@@ -248,33 +267,88 @@ export default function DashboardPage() {
     }
   }, [selectedRow]);
 
-  // Handle tag selection
-  const handleTagSelect = useCallback(async (rowIndex: number, tag: string) => {
+  // Handle tag selection for individual images using global tags
+  const handleTagSelect = useCallback(async (rowIndex: number, tag: string, imagePath: string) => {
     if (!excelData) return;
 
-    const updatedData = { ...excelData };
-    const row = updatedData.data[rowIndex];
+    // Update global tags
+    const updatedGlobalTags = { ...globalImageTags };
     
-    if (!row.tags) {
-      row.tags = [];
+    // Initialize tags for this specific image if they don't exist
+    if (!updatedGlobalTags[imagePath]) {
+      updatedGlobalTags[imagePath] = [];
     }
     
-    if (row.tags.includes(tag)) {
-      row.tags = row.tags.filter(t => t !== tag);
+    // Toggle the tag for this specific image
+    if (updatedGlobalTags[imagePath].includes(tag)) {
+      updatedGlobalTags[imagePath] = updatedGlobalTags[imagePath].filter(t => t !== tag);
     } else {
-      row.tags.push(tag);
+      updatedGlobalTags[imagePath].push(tag);
     }
 
-    setExcelData(updatedData);
+    setGlobalImageTags(updatedGlobalTags);
 
     try {
-      await fetch(`/api/data/${excelData._id}`, {
+      console.log('Sending global tags update:', {
+        filename: excelData.filename,
+        imagePath,
+        tags: updatedGlobalTags[imagePath]
+      });
+      
+      // Update global tags on the server
+      const response = await fetch('/api/global-tags', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: updatedData.data })
+        body: JSON.stringify({ 
+          filename: excelData.filename,
+          imagePath,
+          tags: updatedGlobalTags[imagePath]
+        })
       });
+      
+      const result = await response.json();
+      console.log('Global tags update result:', result);
     } catch (error) {
-      console.error('Error updating tags:', error);
+      console.error('Error updating global tags:', error);
+    }
+  }, [excelData, globalImageTags]);
+
+  // Handle export tagged data
+  const handleExportTaggedData = useCallback(async () => {
+    if (!excelData) return;
+    
+    setIsExporting(true);
+    try {
+      const response = await fetch('/api/export-tags', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          filename: excelData.filename
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Export failed');
+      }
+
+      // Create download link
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${excelData.filename.replace('.xlsx', '')}_tagged_analysis.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+    } catch (error) {
+      console.error('Error exporting data:', error);
+      alert('Failed to export data. Please try again.');
+    } finally {
+      setIsExporting(false);
     }
   }, [excelData]);
 
@@ -309,7 +383,9 @@ export default function DashboardPage() {
         <Navbar 
           selectedSheet={selectedSheet} 
           sheets={sheets} 
-          onSheetChange={handleSheetChange} 
+          onSheetChange={handleSheetChange}
+          onExport={handleExportTaggedData}
+          isExporting={isExporting}
         />
         <div className="flex items-center justify-center min-h-[calc(100vh-64px)]">
           <div className="text-center">
@@ -326,7 +402,9 @@ export default function DashboardPage() {
       <Navbar 
         selectedSheet={selectedSheet} 
         sheets={sheets} 
-        onSheetChange={handleSheetChange} 
+        onSheetChange={handleSheetChange}
+        onExport={handleExportTaggedData}
+        isExporting={isExporting}
       />
 
       <div className="flex">
@@ -414,25 +492,39 @@ export default function DashboardPage() {
                       }
                     </span>
                     <span className="text-xs text-gray-500 ml-auto">
-                      {currentRowData.row.tags?.length || 0} tags
+                      {Object.keys(globalImageTags).filter(imagePath => 
+                        currentRowData.imagePaths.includes(imagePath) && 
+                        globalImageTags[imagePath].length > 0
+                      ).length} images tagged
                     </span>
                   </div>
                   
                   {currentRowData.imagePaths.length > 0 ? (
                     <div className="p-3">
                       <div className="grid grid-cols-1 gap-1 max-h-32 overflow-y-auto">
-                        {currentRowData.imagePaths.map((filename, idx) => (
-                          <div 
-                            key={idx} 
-                            className={`flex items-center p-2 rounded text-xs transition-colors cursor-pointer ${
-                              idx === currentImageIndex ? 'bg-blue-100 text-blue-700' : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
-                            }`}
-                            onClick={() => setCurrentImageIndex(idx)}
-                          >
-                            <ImageIcon className="w-3 h-3 mr-2 text-gray-400" />
-                            <span className="truncate">{filename}</span>
-                          </div>
-                        ))}
+                        {currentRowData.imagePaths.map((filename, idx) => {
+                          const hasImageTags = (globalImageTags[filename]?.length || 0) > 0;
+                          return (
+                            <div 
+                              key={idx} 
+                              className={`flex items-center p-2 rounded text-xs transition-colors cursor-pointer ${
+                                idx === currentImageIndex ? 'bg-blue-100 text-blue-700' : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
+                              }`}
+                              onClick={() => setCurrentImageIndex(idx)}
+                            >
+                              <ImageIcon className="w-3 h-3 mr-2 text-gray-400" />
+                              <span className="truncate flex-1">{filename}</span>
+                              {hasImageTags && (
+                                <div className="flex items-center ml-1">
+                                  <TagIcon className="w-3 h-3 text-green-500" />
+                                  <span className="text-green-600 font-medium ml-1">
+                                    {globalImageTags[filename]?.length || 0}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   ) : (
@@ -457,20 +549,28 @@ export default function DashboardPage() {
               <div>
                 <h5 className="text-sm font-medium text-gray-900 mb-3 flex items-center">
                   <TagIcon className="w-4 h-4 mr-1" />
-                  Tags
+                  Tags for Current Image
                 </h5>
+                <div className="mb-3 p-2 bg-blue-50 rounded text-xs text-blue-700">
+                  Tagging: {currentRowData.imagePaths[currentImageIndex]}
+                </div>
                 <div className="space-y-2">
-                  {TAGS.map((tag) => (
-                    <label key={tag} className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={currentRowData.row.tags?.includes(tag) || false}
-                        onChange={() => handleTagSelect(selectedRow!, tag)}
-                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded mr-2"
-                      />
-                      <span className="text-sm text-gray-700">{tag}</span>
-                    </label>
-                  ))}
+                  {TAGS.map((tag) => {
+                    const currentImagePath = currentRowData.imagePaths[currentImageIndex];
+                    const isChecked = globalImageTags[currentImagePath]?.includes(tag) || false;
+                    
+                    return (
+                      <label key={tag} className="flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => handleTagSelect(selectedRow!, tag, currentImagePath)}
+                          className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded mr-2"
+                        />
+                        <span className="text-sm text-gray-700">{tag}</span>
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
             </div>

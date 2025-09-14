@@ -10,7 +10,9 @@ export interface IExcelData extends Document {
     imagePaths?: string[];
     tags?: string[];
     isSelected?: boolean;
+    imageTags?: { [imagePath: string]: string[] }; // Individual image tags
   }>;
+  globalImageTags?: { [imagePath: string]: string[] }; // Global tags across all sheets
   uploadedAt: Date;
 }
 
@@ -29,8 +31,10 @@ const ExcelDataSchema: Schema = new Schema({
     filenames: String,
     imagePaths: [String],
     tags: [String],
-    isSelected: { type: Boolean, default: false }
+    isSelected: { type: Boolean, default: false },
+    imageTags: { type: Schema.Types.Mixed, default: {} } // Individual image tags
   }],
+  globalImageTags: { type: Schema.Types.Mixed, default: {} }, // Global tags across all sheets
   uploadedAt: {
     type: Date,
     default: Date.now,
