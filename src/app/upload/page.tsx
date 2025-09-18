@@ -6,6 +6,7 @@ import { Upload, FileSpreadsheet, AlertCircle } from 'lucide-react';
 
 export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null);
+  const [csvFile, setCsvFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
@@ -24,6 +25,19 @@ export default function UploadPage() {
     }
   };
 
+  const handleCsvFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0];
+    if (selectedFile) {
+      if (selectedFile.type === 'text/csv' || selectedFile.name.endsWith('.csv')) {
+        setCsvFile(selectedFile);
+        setError(null);
+      } else {
+        setError('Please select a valid .csv file');
+        setCsvFile(null);
+      }
+    }
+  };
+
   const handleUpload = async () => {
     if (!file) return;
 
@@ -31,22 +45,42 @@ export default function UploadPage() {
     setError(null);
 
     try {
-      const formData = new FormData();
-      formData.append('file', file);
+      // Upload Excel file first
+      const excelFormData = new FormData();
+      excelFormData.append('file', file);
 
-      const response = await fetch('/api/upload', {
+      const excelResponse = await fetch('/api/upload', {
         method: 'POST',
-        body: formData,
+        body: excelFormData,
       });
 
-      if (!response.ok) {
-        throw new Error('Upload failed');
+      if (!excelResponse.ok) {
+        throw new Error('Excel upload failed');
       }
 
-      const result = await response.json();
-      router.push(`/dashboard/${result.id}`);
+      const excelResult = await excelResponse.json();
+
+      // Upload CSV file if provided
+      if (csvFile) {
+        const csvFormData = new FormData();
+        csvFormData.append('csvFile', csvFile);
+
+        const csvResponse = await fetch('/api/upload-csv', {
+          method: 'POST',
+          body: csvFormData,
+        });
+
+        if (!csvResponse.ok) {
+          console.warn('CSV upload failed, but Excel was uploaded successfully');
+        } else {
+          console.log('Both Excel and CSV files uploaded successfully');
+        }
+      }
+
+      // Navigate to dashboard regardless of CSV upload status
+      router.push(`/dashboard/${excelResult.id}`);
     } catch (err) {
-      setError('Failed to upload file. Please try again.');
+      setError('Failed to upload files. Please try again.');
       console.error('Upload error:', err);
     } finally {
       setIsUploading(false);
@@ -65,9 +99,10 @@ export default function UploadPage() {
         </div>
 
         <div className="space-y-6">
+          {/* Excel File Upload */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Choose File
+              Choose Excel File (.xlsx)
             </label>
             <div className="relative">
               <input
@@ -82,6 +117,30 @@ export default function UploadPage() {
                 <div className="flex items-center">
                   <FileSpreadsheet className="w-5 h-5 text-green-600 mr-2" />
                   <span className="text-sm text-green-800">{file.name}</span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* CSV File Upload */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Choose CSV File (.csv) - Optional
+            </label>
+            <p className="text-xs text-gray-500 mb-2">Upload your species classification CSV to enable automatic updates</p>
+            <div className="relative">
+              <input
+                type="file"
+                accept=".csv"
+                onChange={handleCsvFileChange}
+                className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100"
+              />
+            </div>
+            {csvFile && (
+              <div className="mt-2 p-3 bg-green-50 border border-green-200 rounded-lg">
+                <div className="flex items-center">
+                  <FileSpreadsheet className="w-5 h-5 text-green-600 mr-2" />
+                  <span className="text-sm text-green-800">{csvFile.name}</span>
                 </div>
               </div>
             )}
@@ -107,7 +166,7 @@ export default function UploadPage() {
             ) : (
               <>
                 <Upload className="w-5 h-5 mr-2" />
-                Upload File
+                Upload {csvFile ? 'Files' : 'File'}
               </>
             )}
           </button>

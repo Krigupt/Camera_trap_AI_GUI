@@ -13,6 +13,7 @@ export interface IExcelData extends Document {
     imageTags?: { [imagePath: string]: string[] }; // Individual image tags
   }>;
   globalImageTags?: { [imagePath: string]: string[] }; // Global tags across all sheets
+  globalImageSpecies?: { [imagePath: string]: string }; // Global species classifications across all sheets
   uploadedAt: Date;
 }
 
@@ -35,6 +36,7 @@ const ExcelDataSchema: Schema = new Schema({
     imageTags: { type: Schema.Types.Mixed, default: {} } // Individual image tags
   }],
   globalImageTags: { type: Schema.Types.Mixed, default: {} }, // Global tags across all sheets
+  globalImageSpecies: { type: Schema.Types.Mixed, default: {} }, // Global species classifications across all sheets
   uploadedAt: {
     type: Date,
     default: Date.now,

@@ -39,8 +39,6 @@ export async function POST(request: NextRequest) {
 
     // Process each unique sheet
     for (const sheet of uniqueSheets) {
-      console.log(`Processing sheet: ${sheet.sheetName}`);
-      console.log(`Global image tags for sheet:`, Object.keys(sheet.globalImageTags || {}));
       
       // Group data by human-ai pairs
       const groupedData = new Map();
@@ -68,10 +66,8 @@ export async function POST(request: NextRequest) {
           row.imagePaths.forEach((imagePath: string) => {
             // Get global tags for this image from any sheet (they should be the same)
             const globalTags = sheet.globalImageTags?.[imagePath];
-            console.log(`Image: ${imagePath}, Global tags:`, globalTags);
             if (globalTags && globalTags.length > 0) {
               globalTags.forEach((tag: string) => {
-                console.log(`Adding image ${imagePath} to tag ${tag}`);
                 if (group.taggedImages[tag]) {
                   // Add this specific image to the tag column
                   if (!group.taggedImages[tag].includes(imagePath)) {

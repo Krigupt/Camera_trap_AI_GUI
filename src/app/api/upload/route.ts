@@ -26,7 +26,6 @@ export async function POST(request: NextRequest) {
       const headers = jsonData[0] as string[];
       if (!headers) continue;
 
-      // Debug: Log all headers
 
       // Find required columns
       const humanIndex = headers.findIndex(h => h?.toLowerCase().includes('human'));

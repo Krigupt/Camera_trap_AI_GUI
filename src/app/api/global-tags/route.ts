@@ -7,7 +7,6 @@ export async function PUT(request: NextRequest) {
     await connectDB();
     
     const { filename, imagePath, tags } = await request.json();
-    console.log(`Updating global tags - Filename: ${filename}, Image: ${imagePath}, Tags:`, tags);
 
     if (!filename || !imagePath) {
       return NextResponse.json({ error: 'Filename and imagePath are required' }, { status: 400 });
@@ -20,8 +19,6 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'No data found for this filename' }, { status: 404 });
     }
 
-    console.log(`Found ${allSheets.length} sheets to update`);
-
     // Update global tags for all sheets of this file
     for (const sheet of allSheets) {
       if (!sheet.globalImageTags) {
@@ -31,7 +28,6 @@ export async function PUT(request: NextRequest) {
       sheet.globalImageTags[imagePath] = tags;
       sheet.markModified('globalImageTags'); // Force Mongoose to detect changes
       await sheet.save();
-      console.log(`Updated global tags for sheet: ${sheet.sheetName}`);
     }
 
     return NextResponse.json({ success: true });

@@ -18,6 +18,7 @@ interface ExcelData {
     imageTags?: { [imagePath: string]: string[] }; // Individual image tags
   }>;
   globalImageTags?: { [imagePath: string]: string[] }; // Global tags across all sheets
+  globalImageSpecies?: { [imagePath: string]: string }; // Global species classifications across all sheets
 }
 
 interface Sheet {
@@ -31,6 +32,28 @@ const TAGS = [
   'Body part',
   'Blends in',
   'Unidentifiable to taxonomix level by human ground-truth'
+];
+
+const SPECIES_LIST = [
+  'Black-tailed jackrabbit - Lepus californicus',
+  'Bobcat - Lynx rufus',
+  '(Desert cottontail) - Sylvilagus audubonii',
+  'Coyote - Canis latrans',
+  'Domestic horse - Equus ferus caballus',
+  'Domestic cattle - Bos taurus',
+  'Gray fox - Urocyon cinereoargenteus',
+  'Mule deer - Odocoileus hemionus',
+  'Northern raccoon - Procyon lotor',
+  'Puma - Puma concolor',
+  'Striped skunk - Mephitis mephitis',
+  'Virginia opossum - Didelphis virginiana',
+  'Black bear - Ursus americanus',
+  'Wild boar - Sus scrofa',
+  'Western spotted skunk - Spilogale gracilis',
+  'Western gray squirrel - Sciurus griseus',
+  'Eastern gray squirrel - Sciurus carolinensis',
+  '(Dusky-footed woodrat) - Neotoma fuscipes',
+  'Unknown - (no scientific name)'
 ];
 
 // Helper function to get image paths from row data
@@ -79,7 +102,7 @@ const Navbar = ({ selectedSheet, sheets, onSheetChange, onExport, isExporting }:
           </button>
           
           <select 
-            value={selectedSheet || ''} 
+            value={sheets.find(sheet => sheet.sheetName === selectedSheet)?.id || ''} 
             onChange={(e) => onSheetChange(e.target.value)}
             className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors border-none outline-none cursor-pointer"
           >
@@ -193,15 +216,20 @@ export default function DashboardPage() {
   const [currentImageIndex, setCurrentImageIndex] = useState<number>(0);
   const [isExporting, setIsExporting] = useState(false);
   const [globalImageTags, setGlobalImageTags] = useState<{ [imagePath: string]: string[] }>({});
+  const [globalImageSpecies, setGlobalImageSpecies] = useState<{ [imagePath: string]: string }>({});
+  const [showDownloadOptions, setShowDownloadOptions] = useState(false);
+  const [downloadOptions, setDownloadOptions] = useState({
+    taggedExcel: true,
+    updatedCsv: true,
+    originalData: false
+  });
 
   // Fetch global image tags
   const fetchGlobalTags = useCallback(async (filename: string) => {
     try {
-      console.log('Fetching global tags for filename:', filename);
       const response = await fetch(`/api/global-tags?filename=${encodeURIComponent(filename)}`);
       if (response.ok) {
         const data = await response.json();
-        console.log('Fetched global tags:', data.globalImageTags);
         setGlobalImageTags(data.globalImageTags || {});
       } else {
         console.error('Failed to fetch global tags:', response.status);
@@ -211,14 +239,28 @@ export default function DashboardPage() {
     }
   }, []);
 
+  // Fetch global image species
+  const fetchGlobalSpecies = useCallback(async (filename: string) => {
+    try {
+      const response = await fetch(`/api/global-species?filename=${encodeURIComponent(filename)}`);
+      if (response.ok) {
+        const data = await response.json();
+        setGlobalImageSpecies(data.globalImageSpecies || {});
+      }
+    } catch (error) {
+      console.error('Error fetching global species:', error);
+    }
+  }, []);
+
   // Fetch initial data and sheets
   const fetchData = useCallback(async () => {
     try {
       const response = await fetch(`/api/data/${params.id}`);
       const data = await response.json();
       
-      // Fetch global tags
+      // Fetch global tags and species
       await fetchGlobalTags(data.filename);
+      await fetchGlobalSpecies(data.filename);
       
       const encodedFilename = encodeURIComponent(data.filename);
       const sheetsResponse = await fetch(`/api/sheets/${encodedFilename}`);
@@ -237,23 +279,36 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [params.id, fetchGlobalTags]);
+  }, [params.id, fetchGlobalTags, fetchGlobalSpecies]);
 
   // Handle sheet change
   const handleSheetChange = useCallback(async (sheetId: string) => {
     try {
+      // Find the sheet name from the sheets array
+      const selectedSheetData = sheets.find(sheet => sheet.id === sheetId);
+      if (!selectedSheetData) {
+        console.error('Sheet not found:', sheetId);
+        return;
+      }
+      
+      // Update selected sheet immediately
+      setSelectedSheet(selectedSheetData.sheetName);
+      
       const response = await fetch(`/api/data/${sheetId}`);
       const data = await response.json();
       
-      
       setExcelData(data);
-      setSelectedSheet(data.sheetName);
+      
+      // Refresh global tags and species when switching sheets
+      await fetchGlobalTags(data.filename);
+      await fetchGlobalSpecies(data.filename);
+      
       setSelectedRow(null);
       setShowImageSidebar(false);
     } catch (error) {
       console.error('Error fetching sheet data:', error);
     }
-  }, []);
+  }, [sheets, fetchGlobalTags, fetchGlobalSpecies]);
 
   // Handle row selection
   const handleRowSelect = useCallback((index: number) => {
@@ -289,12 +344,6 @@ export default function DashboardPage() {
     setGlobalImageTags(updatedGlobalTags);
 
     try {
-      console.log('Sending global tags update:', {
-        filename: excelData.filename,
-        imagePath,
-        tags: updatedGlobalTags[imagePath]
-      });
-      
       // Update global tags on the server
       const response = await fetch('/api/global-tags', {
         method: 'PUT',
@@ -307,50 +356,178 @@ export default function DashboardPage() {
       });
       
       const result = await response.json();
-      console.log('Global tags update result:', result);
+      if (!result.success) {
+        console.error('Failed to update global tags:', result);
+      }
     } catch (error) {
       console.error('Error updating global tags:', error);
     }
   }, [excelData, globalImageTags]);
 
-  // Handle export tagged data
+  // Handle species classification
+  const handleSpeciesClassification = useCallback(async (rowIndex: number, species: string, imagePath: string) => {
+    if (!excelData) return;
+
+    // Handle clear selection
+    if (species === 'CLEAR_SELECTION') {
+      const updatedSpecies = { ...globalImageSpecies };
+      delete updatedSpecies[imagePath];
+      setGlobalImageSpecies(updatedSpecies);
+      
+      // Clear from database as well
+      try {
+        await fetch('/api/global-species', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            filename: excelData.filename,
+            imagePath,
+            species: '' // Empty string to clear
+          })
+        });
+      } catch (error) {
+        console.error('Error clearing species classification:', error);
+      }
+      return;
+    }
+
+    // Update local state immediately
+    const updatedSpecies = { ...globalImageSpecies };
+    updatedSpecies[imagePath] = species;
+    setGlobalImageSpecies(updatedSpecies);
+
+    try {
+      // Update species classification on the server (CSV)
+      const csvResponse = await fetch('/api/update-species', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          filename: excelData.filename,
+          sheetName: excelData.sheetName,
+          imagePath,
+          species
+        })
+      });
+      
+      // Update global species in database
+      const globalResponse = await fetch('/api/global-species', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          filename: excelData.filename,
+          imagePath,
+          species
+        })
+      });
+      
+      const csvResult = await csvResponse.json();
+      const globalResult = await globalResponse.json();
+      
+      if (!csvResult.success || !globalResult.success) {
+        // Revert local state if server update failed
+        const revertedSpecies = { ...globalImageSpecies };
+        delete revertedSpecies[imagePath];
+        setGlobalImageSpecies(revertedSpecies);
+        alert('Failed to update species classification. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error updating species classification:', error);
+      // Revert local state on error
+      const revertedSpecies = { ...globalImageSpecies };
+      delete revertedSpecies[imagePath];
+      setGlobalImageSpecies(revertedSpecies);
+      alert('Error updating species classification. Please try again.');
+    }
+  }, [excelData, globalImageSpecies]);
+
+  // Handle export tagged data (show download options)
   const handleExportTaggedData = useCallback(async () => {
     if (!excelData) return;
     
+    setShowDownloadOptions(true);
+  }, [excelData]);
+
+  // Handle download with selected options
+  const handleDownloadWithOptions = useCallback(async () => {
+    if (!excelData) return;
+    
     setIsExporting(true);
+    setShowDownloadOptions(false);
+    
     try {
-      const response = await fetch('/api/export-tags', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          filename: excelData.filename
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('Export failed');
+      const downloads = [];
+      
+      // Download tagged Excel if selected
+      if (downloadOptions.taggedExcel) {
+        const response = await fetch('/api/export-tags', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: excelData.filename }),
+        });
+        
+        if (response.ok) {
+          const blob = await response.blob();
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `tagged_data_${excelData.filename.replace('.xlsx', '')}.xlsx`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          window.URL.revokeObjectURL(url);
+          downloads.push('Tagged Excel');
+        }
       }
-
-      // Create download link
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${excelData.filename.replace('.xlsx', '')}_tagged_analysis.xlsx`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-
+      
+      // Download updated CSV if selected
+      if (downloadOptions.updatedCsv) {
+        const response = await fetch('/api/download-csv');
+        
+        if (response.ok) {
+          const blob = await response.blob();
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'updated_species_data.csv';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          window.URL.revokeObjectURL(url);
+          downloads.push('Updated CSV');
+        }
+      }
+      
+      // Download original data if selected
+      if (downloadOptions.originalData) {
+        const response = await fetch(`/api/download-original/${excelData._id}`);
+        
+        if (response.ok) {
+          const blob = await response.blob();
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `original_${excelData.filename}`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          window.URL.revokeObjectURL(url);
+          downloads.push('Original Data');
+        }
+      }
+      
+      if (downloads.length > 0) {
+        alert(`Downloaded: ${downloads.join(', ')}`);
+      } else {
+        alert('No files selected for download');
+      }
+      
     } catch (error) {
-      console.error('Error exporting data:', error);
-      alert('Failed to export data. Please try again.');
+      console.error('Download failed:', error);
+      alert('Download failed. Please try again.');
     } finally {
       setIsExporting(false);
     }
-  }, [excelData]);
+  }, [excelData, downloadOptions]);
 
   // Get current row data and image paths
   const currentRowData = useMemo(() => {
@@ -504,6 +681,7 @@ export default function DashboardPage() {
                       <div className="grid grid-cols-1 gap-1 max-h-32 overflow-y-auto">
                         {currentRowData.imagePaths.map((filename, idx) => {
                           const hasImageTags = (globalImageTags[filename]?.length || 0) > 0;
+                          const hasSpeciesClassification = globalImageSpecies[filename];
                           return (
                             <div 
                               key={idx} 
@@ -514,14 +692,21 @@ export default function DashboardPage() {
                             >
                               <ImageIcon className="w-3 h-3 mr-2 text-gray-400" />
                               <span className="truncate flex-1">{filename}</span>
-                              {hasImageTags && (
-                                <div className="flex items-center ml-1">
-                                  <TagIcon className="w-3 h-3 text-green-500" />
-                                  <span className="text-green-600 font-medium ml-1">
-                                    {globalImageTags[filename]?.length || 0}
-                                  </span>
-                                </div>
-                              )}
+                              <div className="flex items-center ml-1 space-x-1">
+                                {hasImageTags && (
+                                  <div className="flex items-center">
+                                    <TagIcon className="w-3 h-3 text-green-500" />
+                                    <span className="text-green-600 font-medium ml-1">
+                                      {globalImageTags[filename]?.length || 0}
+                                    </span>
+                                  </div>
+                                )}
+                                {hasSpeciesClassification && (
+                                  <div className="flex items-center">
+                                    <span className="text-blue-500 font-medium">🐾</span>
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           );
                         })}
@@ -573,10 +758,92 @@ export default function DashboardPage() {
                   })}
                 </div>
               </div>
+
+              {/* Species Classification Section */}
+              <div className="mt-6">
+                <h5 className="text-sm font-medium text-gray-900 mb-3 flex items-center">
+                  🐾 Species Classification
+                </h5>
+                <div className="mb-3 p-2 bg-green-50 rounded text-xs text-green-700">
+                  Update species for: {currentRowData.imagePaths[currentImageIndex]}
+                </div>
+                <select 
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  value={globalImageSpecies[currentRowData.imagePaths[currentImageIndex]] || ""}
+                  onChange={(e) => handleSpeciesClassification(selectedRow!, e.target.value, currentRowData.imagePaths[currentImageIndex])}
+                >
+                  <option value="" disabled>Select Species Classification</option>
+                  <option value="CLEAR_SELECTION" className="text-red-600 font-medium">
+                    ✕ Clear Selection
+                  </option>
+                  {SPECIES_LIST.map((species) => (
+                    <option key={species} value={species}>
+                      {species}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
         )}
       </div>
+
+      {/* Download Options Modal */}
+      {showDownloadOptions && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-lg font-medium text-gray-900 mb-4">Select Files to Download</h3>
+            
+            <div className="space-y-3 mb-6">
+              <label className="flex items-center">
+                <input
+                  type="checkbox"
+                  checked={downloadOptions.taggedExcel}
+                  onChange={(e) => setDownloadOptions(prev => ({ ...prev, taggedExcel: e.target.checked }))}
+                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded mr-3"
+                />
+                <span className="text-sm text-gray-700">Tagged Excel Analysis</span>
+              </label>
+              
+              <label className="flex items-center">
+                <input
+                  type="checkbox"
+                  checked={downloadOptions.updatedCsv}
+                  onChange={(e) => setDownloadOptions(prev => ({ ...prev, updatedCsv: e.target.checked }))}
+                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded mr-3"
+                />
+                <span className="text-sm text-gray-700">Updated Species CSV</span>
+              </label>
+              
+              <label className="flex items-center">
+                <input
+                  type="checkbox"
+                  checked={downloadOptions.originalData}
+                  onChange={(e) => setDownloadOptions(prev => ({ ...prev, originalData: e.target.checked }))}
+                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded mr-3"
+                />
+                <span className="text-sm text-gray-700">Original Excel Data</span>
+              </label>
+            </div>
+            
+            <div className="flex space-x-3">
+              <button
+                onClick={() => setShowDownloadOptions(false)}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDownloadWithOptions}
+                disabled={!downloadOptions.taggedExcel && !downloadOptions.updatedCsv && !downloadOptions.originalData}
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+              >
+                Download Selected
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
