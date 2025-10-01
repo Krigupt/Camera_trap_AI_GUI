@@ -8,6 +8,7 @@ interface ExcelData {
   _id: string;
   filename: string;
   sheetName: string;
+  bucketName: string;
   data: Array<{
     human: string;
     ai: string;
@@ -135,12 +136,14 @@ const ImageDisplay = ({
   imagePaths, 
   currentIndex, 
   onIndexChange, 
-  rowData 
+  rowData,
+  bucketName
 }: {
   imagePaths: string[];
   currentIndex: number;
   onIndexChange: (index: number) => void;
   rowData: { human: string; ai: string };
+  bucketName: string;
 }) => {
   const [imageLoading, setImageLoading] = useState(false);
 
@@ -156,7 +159,35 @@ const ImageDisplay = ({
   }
 
   const currentImagePath = imagePaths[currentIndex];
-  const imageUrl = `/api/images/${currentImagePath}`;
+  const [imageUrl, setImageUrl] = useState<string>('#');
+  
+  // Fetch the signed URL when the image path or bucket changes
+  useEffect(() => {
+    if (bucketName && currentImagePath) {
+      setImageLoading(true);
+      setImageUrl('#'); // Reset URL first
+      
+      fetch(`/api/images/${currentImagePath}?bucket=${bucketName}`)
+        .then(response => response.json())
+        .then(data => {
+          if (data.success && data.imageUrl) {
+            setImageUrl(data.imageUrl);
+          } else {
+            setImageUrl('#');
+          }
+        })
+        .catch(error => {
+          console.error('Error fetching image URL:', error);
+          setImageUrl('#');
+        })
+        .finally(() => {
+          setImageLoading(false);
+        });
+    } else {
+      setImageUrl('#');
+      setImageLoading(false);
+    }
+  }, [currentImagePath, bucketName, currentIndex]); // Added currentIndex to dependencies
 
   return (
     <div>
@@ -188,19 +219,21 @@ const ImageDisplay = ({
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
           </div>
         )}
-        <img 
-          src={imageUrl} 
-          alt={`Image ${currentIndex + 1}`}
-          className="max-w-full max-h-full object-contain rounded shadow-lg"
-          onLoad={() => setImageLoading(false)}
-          onLoadStart={() => setImageLoading(true)}
-          onError={(e) => {
-            setImageLoading(false);
-            e.currentTarget.style.display = 'none';
-            e.currentTarget.nextElementSibling?.classList.remove('hidden');
-          }}
-        />
-        <div className="text-center text-gray-500 hidden">
+        {imageUrl !== '#' ? (
+          <img 
+            src={imageUrl} 
+            alt={`Image ${currentIndex + 1}`}
+            className="max-w-full max-h-full object-contain rounded shadow-lg"
+            onLoad={() => setImageLoading(false)}
+            onError={(e) => {
+              setImageLoading(false);
+              console.error('Image failed to load:', imageUrl);
+              e.currentTarget.style.display = 'none';
+              e.currentTarget.nextElementSibling?.classList.remove('hidden');
+            }}
+          />
+        ) : null}
+        <div className={`text-center text-gray-500 ${imageUrl === '#' ? '' : 'hidden'}`}>
           <ImageIcon className="w-16 h-16 mx-auto mb-2" />
           <p className="text-sm">Image not found: {currentImagePath}</p>
         </div>
@@ -745,6 +778,7 @@ export default function DashboardPage() {
                   currentIndex={currentImageIndex}
                   onIndexChange={setCurrentImageIndex}
                   rowData={{ human: currentRowData.row.human, ai: currentRowData.row.ai }}
+                  bucketName={excelData?.bucketName || ''}
                 />
               </div>
 

@@ -1,15 +1,40 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Upload, FileSpreadsheet, AlertCircle } from 'lucide-react';
+import { Upload, FileSpreadsheet, AlertCircle, Cloud } from 'lucide-react';
 
 export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null);
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedBucket, setSelectedBucket] = useState<string>('');
+  const [buckets, setBuckets] = useState<Array<{name: string, location: string}>>([]);
+  const [loadingBuckets, setLoadingBuckets] = useState(false);
   const router = useRouter();
+
+  // Fetch GCP buckets on component mount
+  useEffect(() => {
+    const fetchBuckets = async () => {
+      setLoadingBuckets(true);
+      try {
+        const response = await fetch('/api/gcp-buckets');
+        const data = await response.json();
+        if (data.success) {
+          setBuckets(data.buckets);
+        } else {
+          setError('Failed to load GCP buckets. Please check your credentials.');
+        }
+      } catch (err) {
+        setError('Failed to connect to GCP. Please check your credentials.');
+      } finally {
+        setLoadingBuckets(false);
+      }
+    };
+
+    fetchBuckets();
+  }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -40,6 +65,10 @@ export default function UploadPage() {
 
   const handleUpload = async () => {
     if (!file) return;
+    if (!selectedBucket) {
+      setError('Please select a GCP bucket for images');
+      return;
+    }
 
     setIsUploading(true);
     setError(null);
@@ -48,6 +77,7 @@ export default function UploadPage() {
       // Upload Excel file first
       const excelFormData = new FormData();
       excelFormData.append('file', file);
+      excelFormData.append('bucketName', selectedBucket);
 
       const excelResponse = await fetch('/api/upload', {
         method: 'POST',
@@ -117,6 +147,40 @@ export default function UploadPage() {
                 <div className="flex items-center">
                   <FileSpreadsheet className="w-5 h-5 text-green-600 mr-2" />
                   <span className="text-sm text-green-800">{file.name}</span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* GCP Bucket Selection */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Select GCP Bucket for Images
+            </label>
+            <p className="text-xs text-gray-500 mb-2">Choose the GCP bucket containing your camera trap images</p>
+            <div className="relative">
+              <select
+                value={selectedBucket}
+                onChange={(e) => setSelectedBucket(e.target.value)}
+                className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                disabled={loadingBuckets}
+              >
+                <option value="">
+                  {loadingBuckets ? 'Loading buckets...' : 'Select a GCP bucket'}
+                </option>
+                {buckets.map((bucket) => (
+                  <option key={bucket.name} value={bucket.name}>
+                    {bucket.name} ({bucket.location})
+                  </option>
+                ))}
+              </select>
+              <Cloud className="absolute right-3 top-2.5 w-5 h-5 text-gray-400" />
+            </div>
+            {selectedBucket && (
+              <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <div className="flex items-center">
+                  <Cloud className="w-5 h-5 text-blue-600 mr-2" />
+                  <span className="text-sm text-blue-800">Selected: {selectedBucket}</span>
                 </div>
               </div>
             )}

@@ -9,9 +9,14 @@ export async function POST(request: NextRequest) {
 
     const formData = await request.formData();
     const file = formData.get('file') as File;
+    const bucketName = formData.get('bucketName') as string;
 
     if (!file) {
       return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
+    }
+
+    if (!bucketName) {
+      return NextResponse.json({ error: 'GCP bucket name is required' }, { status: 400 });
     }
 
     const buffer = await file.arrayBuffer();
@@ -59,6 +64,7 @@ export async function POST(request: NextRequest) {
       const excelData = new ExcelData({
         filename: file.name,
         sheetName,
+        bucketName,
         data,
       });
 

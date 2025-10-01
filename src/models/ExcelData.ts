@@ -3,6 +3,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 export interface IExcelData extends Document {
   filename: string;
   sheetName: string;
+  bucketName: string; // GCP bucket name for images
   data: Array<{
     human: string;
     ai: string;
@@ -23,6 +24,10 @@ const ExcelDataSchema: Schema = new Schema({
     required: true,
   },
   sheetName: {
+    type: String,
+    required: true,
+  },
+  bucketName: {
     type: String,
     required: true,
   },
