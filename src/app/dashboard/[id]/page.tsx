@@ -35,6 +35,9 @@ const TAGS = [
 ];
 
 const SPECIES_LIST = [
+  'Aves',
+  'Mammalia',
+  'NAN',
   'Black-tailed jackrabbit - Lepus californicus',
   'Bobcat - Lynx rufus',
   '(Desert cottontail) - Sylvilagus audubonii',
