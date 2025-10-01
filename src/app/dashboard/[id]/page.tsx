@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useParams } from 'next/navigation';
-import { ImageIcon, TagIcon, DownloadIcon } from 'lucide-react';
+import { useParams, useRouter } from 'next/navigation';
+import { ImageIcon, TagIcon, DownloadIcon, ArrowLeft } from 'lucide-react';
 
 interface ExcelData {
   _id: string;
@@ -71,17 +71,25 @@ const getImagePaths = (row: ExcelData['data'][0]): string[] => {
 };
 
 // Navbar component to avoid duplication
-const Navbar = ({ selectedSheet, sheets, onSheetChange, onExport, isExporting }: {
+const Navbar = ({ selectedSheet, sheets, onSheetChange, onExport, isExporting, onBack }: {
   selectedSheet: string;
   sheets: Sheet[];
   onSheetChange: (sheetId: string) => void;
   onExport: () => void;
   isExporting: boolean;
+  onBack: () => void;
 }) => (
   <nav className="bg-white shadow-sm border-b">
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       <div className="flex justify-between h-16">
-        <div className="flex items-center">
+        <div className="flex items-center space-x-4">
+          <button
+            onClick={onBack}
+            className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors"
+          >
+            <ArrowLeft className="w-5 h-5" />
+            <span>Back to Upload</span>
+          </button>
           <h1 className="text-xl font-semibold text-gray-900">Excel Data Dashboard</h1>
         </div>
         
@@ -210,6 +218,7 @@ const ImageDisplay = ({
 
 export default function DashboardPage() {
   const params = useParams();
+  const router = useRouter();
   const [excelData, setExcelData] = useState<ExcelData | null>(null);
   const [sheets, setSheets] = useState<Sheet[]>([]);
   const [selectedSheet, setSelectedSheet] = useState<string>('');
@@ -451,6 +460,10 @@ export default function DashboardPage() {
   }, [excelData]);
 
   // Handle download with selected options
+  const handleBackToUpload = useCallback(() => {
+    router.push('/upload');
+  }, [router]);
+
   const handleDownloadWithOptions = useCallback(async () => {
     if (!excelData) return;
     
@@ -566,6 +579,7 @@ export default function DashboardPage() {
           onSheetChange={handleSheetChange}
           onExport={handleExportTaggedData}
           isExporting={isExporting}
+          onBack={handleBackToUpload}
         />
         <div className="flex items-center justify-center min-h-[calc(100vh-64px)]">
           <div className="text-center">
@@ -585,6 +599,7 @@ export default function DashboardPage() {
         onSheetChange={handleSheetChange}
         onExport={handleExportTaggedData}
         isExporting={isExporting}
+        onBack={handleBackToUpload}
       />
 
       <div className="flex">
