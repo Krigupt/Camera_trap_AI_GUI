@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import ExcelData from '@/models/ExcelData';
-import fs from 'fs';
+import CsvData from '@/models/CsvData';
 import path from 'path';
 
 export async function PUT(request: NextRequest) {
@@ -33,100 +33,50 @@ export async function PUT(request: NextRequest) {
     // Extract the image filename from the path
     const imageFilename = path.basename(imagePath);
     
-    // Update the CSV file if it exists
-    const csvPath = `/Users/krishnagupta/Desktop/internship/filtered_output_B1.csv`;
-    
-    if (fs.existsSync(csvPath)) {
-      try {
-        const csvContent = fs.readFileSync(csvPath, 'utf-8');
-        const lines = csvContent.split('\n');
-        
-        // Find the header line to get column indices
-        const headerLine = lines[0];
-        const headers = headerLine.split(',');
-        
-        // Find the column index for the current taxonomic level
-        let updateColumnIndex = -1;
-        const taxonomicLevels = ['Class', 'Order', 'Family', 'Genus', 'Species', 'Common_name'];
+    // Update the CSV data in MongoDB
+    try {
+      // Find the CSV record that matches the image filename
+      const csvRecord = await CsvData.findOne({ filename: imageFilename });
+      
+      if (csvRecord) {
+        // Map taxonomic levels to CSV columns
+        const taxonomicLevels = {
+          'class': 'class',
+          'order': 'order', 
+          'family': 'family',
+          'genus': 'genus',
+          'species': 'species',
+          'common_name': 'common_name'
+        };
         
         // Find which taxonomic level we're working with
-        const currentLevel = taxonomicLevels.find(level => 
+        const currentLevel = Object.keys(taxonomicLevels).find(level => 
           sheetName.toLowerCase().includes(level.toLowerCase())
         );
         
-        if (currentLevel) {
-          updateColumnIndex = headers.findIndex(header => 
-            header.trim().toLowerCase() === currentLevel.toLowerCase()
-          );
-        }
-        
-        if (updateColumnIndex === -1) {
-          // Could not find column for taxonomic level
-        }
-        
-        // Find the filename column
-        const filenameColumnIndex = headers.findIndex(header => 
-          header.trim().toLowerCase().includes('filename') || 
-          header.trim().toLowerCase().includes('file')
-        );
-        
-        if (filenameColumnIndex === -1) {
-          // Could not find filename column in CSV
-        }
-        
-        // Update the CSV content
-        let updated = false;
-        for (let i = 1; i < lines.length; i++) {
-          if (lines[i].trim() === '') continue; // Skip empty lines
+        if (currentLevel && taxonomicLevels[currentLevel]) {
+          const fieldToUpdate = taxonomicLevels[currentLevel];
           
-          const columns = lines[i].split(',');
-          
-          // Check if this row contains our image filename
-          if (filenameColumnIndex !== -1 && columns[filenameColumnIndex]) {
-            const csvFilename = columns[filenameColumnIndex].trim().replace(/['"]/g, '');
-            
-            if (csvFilename === imageFilename || csvFilename.includes(imageFilename)) {
-              // Update the species column if we found the right column
-              if (updateColumnIndex !== -1) {
-                if (isClearing) {
-                  // Clear the species classification (empty cell)
-                  columns[updateColumnIndex] = '""';
-                } else {
-                  // Use the cleaned species classification
-                  columns[updateColumnIndex] = `"${cleanSpecies}"`;
-                }
-                lines[i] = columns.join(',');
-                updated = true;
-                break; // Stop after first match
-              }
-            }
+          if (isClearing) {
+            // Clear the species classification
+            csvRecord[fieldToUpdate] = '';
+          } else {
+            // Update with the cleaned species classification
+            csvRecord[fieldToUpdate] = cleanSpecies;
           }
-        }
-        
-        console.log(`CSV update summary:`, {
-          imageFilename,
-          species: cleanSpecies,
-          filenameColumnIndex,
-          updateColumnIndex,
-          currentLevel,
-          headers: headers.map((h, i) => `${i}: ${h.trim()}`),
-          updated
-        });
-        
-        if (updated) {
-          // Write the updated CSV back to file
-          fs.writeFileSync(csvPath, lines.join('\n'));
-          console.log('CSV file updated successfully');
+          
+          await csvRecord.save();
+          console.log(`CSV record updated: ${imageFilename} -> ${fieldToUpdate} = ${cleanSpecies}`);
         } else {
-          console.log('No matching rows found in CSV for image:', imageFilename);
+          console.log(`No matching taxonomic level found for sheet: ${sheetName}`);
         }
-        
-      } catch (csvError) {
-        console.error('Error updating CSV file:', csvError);
-        // Continue with database update even if CSV update fails
+      } else {
+        console.log(`No CSV record found for image: ${imageFilename}`);
       }
-    } else {
-      console.log('CSV file not found at:', csvPath);
+      
+    } catch (csvError) {
+      console.error('Error updating CSV data in MongoDB:', csvError);
+      // Continue with database update even if CSV update fails
     }
 
     return NextResponse.json({ 

@@ -1,19 +1,39 @@
 import { NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import connectDB from '@/lib/mongodb';
+import CsvData from '@/models/CsvData';
 
 export async function GET() {
   try {
-    const csvPath = '/Users/krishnagupta/Desktop/internship/filtered_output_B1.csv';
+    await connectDB();
+
+    // Get all CSV data from MongoDB
+    const csvData = await CsvData.find({}).sort({ uploadedAt: -1 });
     
-    if (!fs.existsSync(csvPath)) {
+    if (csvData.length === 0) {
       return NextResponse.json({ 
-        error: 'CSV file not found. Please upload a CSV file first.' 
+        error: 'No CSV data found. Please upload a CSV file first.' 
       }, { status: 404 });
     }
 
-    // Read the CSV file
-    const csvContent = fs.readFileSync(csvPath, 'utf-8');
+    // Generate CSV content
+    const headers = ['deployment_id', 'filename', 'class', 'order', 'family', 'genus', 'species', 'common_name'];
+    const csvLines = [headers.join(',')];
+    
+    csvData.forEach(record => {
+      const row = [
+        record.deployment_id,
+        record.filename,
+        record.class,
+        record.order,
+        record.family,
+        record.genus,
+        record.species,
+        record.common_name
+      ];
+      csvLines.push(row.join(','));
+    });
+
+    const csvContent = csvLines.join('\n');
     
     // Create a response with the CSV content
     const response = new NextResponse(csvContent, {

@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import connectDB from '@/lib/mongodb';
+import CsvData from '@/models/CsvData';
 
 export async function POST(request: NextRequest) {
   try {
+    await connectDB();
+
     const formData = await request.formData();
     const csvFile = formData.get('csvFile') as File;
 
@@ -15,30 +17,52 @@ export async function POST(request: NextRequest) {
     const csvBuffer = await csvFile.arrayBuffer();
     const csvContent = Buffer.from(csvBuffer).toString('utf-8');
 
-    // Define the target path where the CSV should be saved
-    const targetPath = '/Users/krishnagupta/Desktop/internship/filtered_output_B1.csv';
-
-    // Create backup of existing file if it exists
-    if (fs.existsSync(targetPath)) {
-      const backupPath = `/Users/krishnagupta/Desktop/internship/filtered_output_B1_backup_${Date.now()}.csv`;
-      fs.copyFileSync(targetPath, backupPath);
+    // Parse CSV content
+    const lines = csvContent.split('\n').filter(line => line.trim());
+    const headers = lines[0] ? lines[0].split(',').map(h => h.trim()) : [];
+    
+    // Validate required columns
+    const requiredColumns = ['deployment_id', 'filename', 'class', 'order', 'family', 'genus', 'species', 'common_name'];
+    const missingColumns = requiredColumns.filter(col => !headers.includes(col));
+    
+    if (missingColumns.length > 0) {
+      return NextResponse.json({ 
+        error: `Missing required columns: ${missingColumns.join(', ')}` 
+      }, { status: 400 });
     }
 
-    // Write the new CSV content to the target location
-    fs.writeFileSync(targetPath, csvContent);
-    
-    // Parse the CSV to get some basic info
-    const lines = csvContent.split('\n');
-    const headers = lines[0] ? lines[0].split(',') : [];
-    const rowCount = lines.length - 1; // Exclude header
+    // Clear existing CSV data
+    await CsvData.deleteMany({});
+
+    // Parse and save CSV data to MongoDB
+    const csvDataArray = [];
+    for (let i = 1; i < lines.length; i++) {
+      const values = lines[i].split(',').map(v => v.trim());
+      if (values.length >= headers.length) {
+        const csvRecord = {
+          deployment_id: values[headers.indexOf('deployment_id')] || '',
+          filename: values[headers.indexOf('filename')] || '',
+          class: values[headers.indexOf('class')] || '',
+          order: values[headers.indexOf('order')] || '',
+          family: values[headers.indexOf('family')] || '',
+          genus: values[headers.indexOf('genus')] || '',
+          species: values[headers.indexOf('species')] || '',
+          common_name: values[headers.indexOf('common_name')] || '',
+        };
+        csvDataArray.push(csvRecord);
+      }
+    }
+
+    // Save all records to MongoDB
+    await CsvData.insertMany(csvDataArray);
 
     return NextResponse.json({
       success: true,
-      message: 'CSV file uploaded successfully',
+      message: 'CSV file uploaded and parsed successfully',
       filename: csvFile.name,
-      savedPath: targetPath,
-      headers: headers.map(h => h.trim()),
-      rowCount
+      headers: headers,
+      rowCount: csvDataArray.length,
+      recordsSaved: csvDataArray.length
     });
 
   } catch (error) {
