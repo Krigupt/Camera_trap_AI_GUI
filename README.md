@@ -9,6 +9,9 @@ A Next.js application for uploading Excel files (.xlsx) and managing data with i
 - **Data Table**: View Human and AI columns with checkbox selection
 - **Image Sidebar**: Tag images with predefined categories
 - **MongoDB Integration**: Store and retrieve Excel data
+- **Cloud Storage**: Support for Google Cloud Storage and Amazon S3
+- **Image Management**: Upload, view, and manage camera trap images
+- **CSV Export**: Export tagged data to CSV format
 - **Modern UI**: Responsive design with Tailwind CSS
 
 ## Prerequisites
@@ -16,6 +19,8 @@ A Next.js application for uploading Excel files (.xlsx) and managing data with i
 - Node.js 18+ 
 - MongoDB (local or cloud instance)
 - npm or yarn
+- Google Cloud Platform account (for GCP Storage) - Optional
+- Amazon Web Services account (for S3 Storage) - Optional
 
 ## Installation
 
@@ -31,9 +36,21 @@ npm install
 
 3. Set up environment variables:
 ```bash
-# Create .env.local file with your MongoDB connection string
-MONGODB_URI=mongodb://localhost:27017/excel-upload-app
+# Create .env.local file with your configuration
+# See ENVIRONMENT_SETUP.md for detailed instructions
+MONGODB_URI=mongodb://localhost:27017/camera-trap-ai-gui
 NEXTAUTH_SECRET=your-secret-key-here
+
+# GCP Configuration (for Google Cloud Storage)
+GOOGLE_CLOUD_PROJECT_ID=your-gcp-project-id
+GOOGLE_APPLICATION_CREDENTIALS=./path/to/gcp-service-account.json
+GCP_DEFAULT_BUCKET=your-default-gcp-bucket
+
+# AWS Configuration (for Amazon S3)
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=your-aws-access-key-id
+AWS_SECRET_ACCESS_KEY=your-aws-secret-access-key
+AWS_S3_BUCKET=your-default-s3-bucket
 ```
 
 4. Start MongoDB (if running locally):
@@ -103,14 +120,37 @@ src/
 
 ## Technologies Used
 
-- **Next.js 14** - React framework with App Router
+- **Next.js 15** - React framework with App Router
 - **TypeScript** - Type safety
 - **Tailwind CSS** - Styling
 - **MongoDB** - Database
 - **Mongoose** - ODM for MongoDB
 - **XLSX** - Excel file processing
-- **Headless UI** - Accessible UI components
+- **Google Cloud Storage** - Cloud file storage
+- **Amazon S3** - Cloud file storage
 - **Lucide React** - Icons
+
+## Environment Setup
+
+For detailed environment configuration instructions, including AWS and GCP setup, see [ENVIRONMENT_SETUP.md](./ENVIRONMENT_SETUP.md).
+
+### Quick Setup
+
+1. Copy the environment template:
+   ```bash
+   cp ENVIRONMENT_SETUP.md .env.local
+   ```
+
+2. Edit `.env.local` with your actual credentials:
+   - MongoDB connection string
+   - GCP project ID and service account key
+   - AWS access keys and S3 bucket names
+   - Authentication secret
+
+3. Generate a secure authentication secret:
+   ```bash
+   openssl rand -base64 32
+   ```
 
 ## Excel File Requirements
 

@@ -61,7 +61,9 @@ const SPECIES_LIST = [
 ];
 
 // Helper function to get image paths from row data
-const getImagePaths = (row: ExcelData['data'][0]): string[] => {
+const getImagePaths = (row: ExcelData['data'][0] | undefined | null): string[] => {
+  if (!row) return []; // Add null/undefined check
+  
   if (row.imagePaths && row.imagePaths.length > 0) {
     return row.imagePaths;
   }
@@ -580,10 +582,11 @@ export default function DashboardPage() {
 
   // Get current row data and image paths
   const currentRowData = useMemo(() => {
-    if (!excelData || selectedRow === null) return null;
+    if (!excelData || selectedRow === null || !excelData.data || selectedRow >= excelData.data.length) return null;
     const row = excelData.data[selectedRow];
-    const imagePaths = getImagePaths(row);
+    if (!row) return null; // Add null check for row
     
+    const imagePaths = getImagePaths(row);
     
     return {
       row,
