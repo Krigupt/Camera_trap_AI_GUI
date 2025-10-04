@@ -23,7 +23,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const workbook = XLSX.utils.book_new();
     
     // Convert the stored data back to worksheet format
-    const worksheetData = excelData.data.map(row => ({
+    const worksheetData = excelData.data.map((row: any) => ({
       Human: row.human,
       AI: row.ai,
       Filenames: row.filenames ? row.filenames.join(', ') : ''

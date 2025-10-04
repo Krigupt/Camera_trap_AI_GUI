@@ -54,8 +54,8 @@ export async function PUT(request: NextRequest) {
           sheetName.toLowerCase().includes(level.toLowerCase())
         );
         
-        if (currentLevel && taxonomicLevels[currentLevel]) {
-          const fieldToUpdate = taxonomicLevels[currentLevel];
+        if (currentLevel && taxonomicLevels[currentLevel as keyof typeof taxonomicLevels]) {
+          const fieldToUpdate = taxonomicLevels[currentLevel as keyof typeof taxonomicLevels];
           
           if (isClearing) {
             // Clear the species classification

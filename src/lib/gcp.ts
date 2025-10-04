@@ -47,7 +47,7 @@ export async function listImagesInBucket(bucketName: string, prefix?: string): P
     return files.map(file => ({
       name: file.name,
       url: `https://storage.googleapis.com/${bucketName}/${file.name}`,
-      size: parseInt(file.metadata?.size || '0'),
+      size: parseInt(String(file.metadata?.size || '0')),
       contentType: file.metadata?.contentType || 'image/jpeg'
     }));
   } catch (error) {

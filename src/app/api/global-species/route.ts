@@ -83,7 +83,7 @@ export async function GET(request: NextRequest) {
     const cleanGlobalImageSpecies = {};
     if (sheet.globalImageSpecies) {
       for (const [imagePath, species] of Object.entries(sheet.globalImageSpecies)) {
-        cleanGlobalImageSpecies[imagePath] = typeof species === 'string' 
+        (cleanGlobalImageSpecies as any)[imagePath] = typeof species === 'string'
           ? species.replace(/‚Äî/g, '-').replace(/—/g, '-')
           : species;
       }
