@@ -148,20 +148,9 @@ const ImageDisplay = ({
   bucketName: string;
 }) => {
   const [imageLoading, setImageLoading] = useState(false);
-
-  if (imagePaths.length === 0) {
-    return (
-      <div className="bg-gray-100 rounded-lg p-8 h-96 flex items-center justify-center">
-        <div className="text-center text-gray-500">
-          <ImageIcon className="w-16 h-16 mx-auto mb-2" />
-          <p className="text-sm">No images available</p>
-        </div>
-      </div>
-    );
-  }
-
-  const currentImagePath = imagePaths[currentIndex];
   const [imageUrl, setImageUrl] = useState<string>('#');
+
+  const currentImagePath = imagePaths[currentIndex] || '';
   
   // Fetch the signed URL when the image path or bucket changes
   useEffect(() => {
@@ -190,6 +179,17 @@ const ImageDisplay = ({
       setImageLoading(false);
     }
   }, [currentImagePath, bucketName, currentIndex]); // Added currentIndex to dependencies
+
+  if (imagePaths.length === 0) {
+    return (
+      <div className="bg-gray-100 rounded-lg p-8 h-96 flex items-center justify-center">
+        <div className="text-center text-gray-500">
+          <ImageIcon className="w-16 h-16 mx-auto mb-2" />
+          <p className="text-sm">No images available</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -592,7 +592,7 @@ export default function DashboardPage() {
       row,
       imagePaths
     };
-  }, [excelData, selectedRow, selectedSheet]);
+  }, [excelData, selectedRow]);
 
   useEffect(() => {
     fetchData();
