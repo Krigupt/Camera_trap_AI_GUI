@@ -13,7 +13,8 @@ export interface IExcelData extends Document {
     isSelected?: boolean;
     imageTags?: { [imagePath: string]: string[] }; // Individual image tags
   }>;
-  globalImageTags?: { [imagePath: string]: string[] }; // Global tags across all sheets
+  globalImageTags?: { [imagePath: string]: string[] }; // Global tags across all sheets (DEPRECATED - use sheetSpecificImageTags)
+  sheetSpecificImageTags?: { [sheetName: string]: { [imagePath: string]: string[] } }; // Sheet-specific tags
   globalImageSpecies?: { [imagePath: string]: string }; // Global species classifications across all sheets
   uploadedAt: Date;
 }
@@ -40,7 +41,8 @@ const ExcelDataSchema: Schema = new Schema({
     isSelected: { type: Boolean, default: false },
     imageTags: { type: Schema.Types.Mixed, default: {} } // Individual image tags
   }],
-  globalImageTags: { type: Schema.Types.Mixed, default: {} }, // Global tags across all sheets
+  globalImageTags: { type: Schema.Types.Mixed, default: {} }, // Global tags across all sheets (DEPRECATED - use sheetSpecificImageTags)
+  sheetSpecificImageTags: { type: Schema.Types.Mixed, default: {} }, // Sheet-specific tags
   globalImageSpecies: { type: Schema.Types.Mixed, default: {} }, // Global species classifications across all sheets
   uploadedAt: {
     type: Date,

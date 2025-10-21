@@ -61,13 +61,13 @@ export async function POST(request: NextRequest) {
         
         const group = groupedData.get(key);
         
-        // Add filenames to appropriate tag columns based on global image tags
+        // Add filenames to appropriate tag columns based on sheet-specific image tags
         if (row.imagePaths) {
           row.imagePaths.forEach((imagePath: string) => {
-            // Get global tags for this image from any sheet (they should be the same)
-            const globalTags = sheet.globalImageTags?.[imagePath];
-            if (globalTags && globalTags.length > 0) {
-              globalTags.forEach((tag: string) => {
+            // Get sheet-specific tags for this image
+            const sheetTags = sheet.sheetSpecificImageTags?.[sheet.sheetName]?.[imagePath];
+            if (sheetTags && sheetTags.length > 0) {
+              sheetTags.forEach((tag: string) => {
                 if (group.taggedImages[tag]) {
                   // Add this specific image to the tag column
                   if (!group.taggedImages[tag].includes(imagePath)) {
@@ -103,14 +103,14 @@ export async function POST(request: NextRequest) {
       
       // Set column widths
       const columnWidths = [
-        { wch: 15 }, // Human
-        { wch: 15 }, // AI
-        { wch: 30 }, // Blurry
-        { wch: 30 }, // Low-light
-        { wch: 30 }, // Body part
-        { wch: 30 }, // Blends in
-        { wch: 40 }, // Unidentifiable...
-        { wch: 30 }  // Notable images
+        { wch: 20 }, // Human
+        { wch: 20 }, // AI
+        { wch: 35 }, // Blurry
+        { wch: 35 }, // Low-light
+        { wch: 35 }, // Body part
+        { wch: 35 }, // Blends in
+        { wch: 65 }, // Unidentifiable... (increased from 40 to 65)
+        { wch: 35 }  // Notable images
       ];
       worksheet['!cols'] = columnWidths;
 

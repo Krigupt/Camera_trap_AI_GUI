@@ -18,7 +18,8 @@ interface ExcelData {
     isSelected?: boolean;
     imageTags?: { [imagePath: string]: string[] }; // Individual image tags
   }>;
-  globalImageTags?: { [imagePath: string]: string[] }; // Global tags across all sheets
+  globalImageTags?: { [imagePath: string]: string[] }; // Global tags across all sheets (DEPRECATED)
+  sheetSpecificImageTags?: { [sheetName: string]: { [imagePath: string]: string[] } }; // Sheet-specific tags
   globalImageSpecies?: { [imagePath: string]: string }; // Global species classifications across all sheets
 }
 
@@ -262,7 +263,7 @@ export default function DashboardPage() {
   const [showImageSidebar, setShowImageSidebar] = useState(false);
   const [currentImageIndex, setCurrentImageIndex] = useState<number>(0);
   const [isExporting, setIsExporting] = useState(false);
-  const [globalImageTags, setGlobalImageTags] = useState<{ [imagePath: string]: string[] }>({});
+  const [sheetImageTags, setSheetImageTags] = useState<{ [imagePath: string]: string[] }>({});
   const [globalImageSpecies, setGlobalImageSpecies] = useState<{ [imagePath: string]: string }>({});
   const [showDownloadOptions, setShowDownloadOptions] = useState(false);
   const [downloadOptions, setDownloadOptions] = useState({
@@ -271,18 +272,18 @@ export default function DashboardPage() {
     originalData: false
   });
 
-  // Fetch global image tags
-  const fetchGlobalTags = useCallback(async (filename: string) => {
+  // Fetch sheet-specific image tags
+  const fetchSheetTags = useCallback(async (filename: string, sheetName: string) => {
     try {
-      const response = await fetch(`/api/global-tags?filename=${encodeURIComponent(filename)}`);
+      const response = await fetch(`/api/global-tags?filename=${encodeURIComponent(filename)}&sheetName=${encodeURIComponent(sheetName)}`);
       if (response.ok) {
         const data = await response.json();
-        setGlobalImageTags(data.globalImageTags || {});
+        setSheetImageTags(data.sheetImageTags || {});
       } else {
-        console.error('Failed to fetch global tags:', response.status);
+        console.error('Failed to fetch sheet-specific tags:', response.status);
       }
     } catch (error) {
-      console.error('Error fetching global tags:', error);
+      console.error('Error fetching sheet-specific tags:', error);
     }
   }, []);
 
@@ -305,8 +306,7 @@ export default function DashboardPage() {
       const response = await fetch(`/api/data/${params.id}`);
       const data = await response.json();
       
-      // Fetch global tags and species
-      await fetchGlobalTags(data.filename);
+      // Fetch global species (no need to fetch tags here yet, we'll fetch when sheet is selected)
       await fetchGlobalSpecies(data.filename);
       
       const encodedFilename = encodeURIComponent(data.filename);
@@ -326,7 +326,7 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [params.id, fetchGlobalTags, fetchGlobalSpecies]);
+  }, [params.id, fetchGlobalSpecies]);
 
   // Handle sheet change
   const handleSheetChange = useCallback(async (sheetId: string) => {
@@ -346,8 +346,8 @@ export default function DashboardPage() {
       
       setExcelData(data);
       
-      // Refresh global tags and species when switching sheets
-      await fetchGlobalTags(data.filename);
+      // Fetch sheet-specific tags and global species when switching sheets
+      await fetchSheetTags(data.filename, selectedSheetData.sheetName);
       await fetchGlobalSpecies(data.filename);
       
       setSelectedRow(null);
@@ -355,7 +355,7 @@ export default function DashboardPage() {
     } catch (error) {
       console.error('Error fetching sheet data:', error);
     }
-  }, [sheets, fetchGlobalTags, fetchGlobalSpecies]);
+  }, [sheets, fetchSheetTags, fetchGlobalSpecies]);
 
   // Handle row selection
   const handleRowSelect = useCallback((index: number) => {
@@ -369,47 +369,48 @@ export default function DashboardPage() {
     }
   }, [selectedRow]);
 
-  // Handle tag selection for individual images using global tags
+  // Handle tag selection for individual images using sheet-specific tags
   const handleTagSelect = useCallback(async (rowIndex: number, tag: string, imagePath: string) => {
     if (!excelData) return;
 
-    // Update global tags
-    const updatedGlobalTags = { ...globalImageTags };
+    // Update sheet-specific tags
+    const updatedSheetTags = { ...sheetImageTags };
     
     // Initialize tags for this specific image if they don't exist
-    if (!updatedGlobalTags[imagePath]) {
-      updatedGlobalTags[imagePath] = [];
+    if (!updatedSheetTags[imagePath]) {
+      updatedSheetTags[imagePath] = [];
     }
     
     // Toggle the tag for this specific image
-    if (updatedGlobalTags[imagePath].includes(tag)) {
-      updatedGlobalTags[imagePath] = updatedGlobalTags[imagePath].filter(t => t !== tag);
+    if (updatedSheetTags[imagePath].includes(tag)) {
+      updatedSheetTags[imagePath] = updatedSheetTags[imagePath].filter(t => t !== tag);
     } else {
-      updatedGlobalTags[imagePath].push(tag);
+      updatedSheetTags[imagePath].push(tag);
     }
 
-    setGlobalImageTags(updatedGlobalTags);
+    setSheetImageTags(updatedSheetTags);
 
     try {
-      // Update global tags on the server
+      // Update sheet-specific tags on the server
       const response = await fetch('/api/global-tags', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           filename: excelData.filename,
+          sheetName: excelData.sheetName,
           imagePath,
-          tags: updatedGlobalTags[imagePath]
+          tags: updatedSheetTags[imagePath]
         })
       });
       
       const result = await response.json();
       if (!result.success) {
-        console.error('Failed to update global tags:', result);
+        console.error('Failed to update sheet-specific tags:', result);
       }
     } catch (error) {
-      console.error('Error updating global tags:', error);
+      console.error('Error updating sheet-specific tags:', error);
     }
-  }, [excelData, globalImageTags]);
+  }, [excelData, sheetImageTags]);
 
   // Handle species classification
   const handleSpeciesClassification = useCallback(async (rowIndex: number, species: string, imagePath: string) => {
@@ -723,9 +724,9 @@ export default function DashboardPage() {
                       }
                     </span>
                     <span className="text-xs text-gray-500 ml-auto">
-                      {Object.keys(globalImageTags).filter(imagePath => 
+                      {Object.keys(sheetImageTags).filter(imagePath => 
                         currentRowData.imagePaths.includes(imagePath) && 
-                        globalImageTags[imagePath].length > 0
+                        sheetImageTags[imagePath].length > 0
                       ).length} images tagged
                     </span>
                   </div>
@@ -734,7 +735,7 @@ export default function DashboardPage() {
                     <div className="p-3">
                       <div className="grid grid-cols-1 gap-1 max-h-32 overflow-y-auto">
                         {currentRowData.imagePaths.map((filename, idx) => {
-                          const hasImageTags = (globalImageTags[filename]?.length || 0) > 0;
+                          const hasImageTags = (sheetImageTags[filename]?.length || 0) > 0;
                           const hasSpeciesClassification = globalImageSpecies[filename];
                           return (
                             <div 
@@ -751,7 +752,7 @@ export default function DashboardPage() {
                                   <div className="flex items-center">
                                     <TagIcon className="w-3 h-3 text-green-500" />
                                     <span className="text-green-600 font-medium ml-1">
-                                      {globalImageTags[filename]?.length || 0}
+                                      {sheetImageTags[filename]?.length || 0}
                                     </span>
                                   </div>
                                 )}
@@ -797,7 +798,7 @@ export default function DashboardPage() {
                 <div className="space-y-2">
                   {TAGS.map((tag) => {
                     const currentImagePath = currentRowData.imagePaths[currentImageIndex];
-                    const isChecked = globalImageTags[currentImagePath]?.includes(tag) || false;
+                    const isChecked = sheetImageTags[currentImagePath]?.includes(tag) || false;
                     
                     return (
                       <label key={tag} className="flex items-center">
