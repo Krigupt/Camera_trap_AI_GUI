@@ -35,26 +35,49 @@ export async function POST(request: NextRequest) {
       // Find required columns
       const humanIndex = headers.findIndex(h => h?.toLowerCase().includes('human'));
       const aiIndex = headers.findIndex(h => h?.toLowerCase().includes('ai'));
-      const filenamesIndex = headers.findIndex(h => h?.toLowerCase().includes('filenames'));
+      
+      // Find all Filenames columns (Filenames, Filenames_1, Filenames_2, etc.)
+      const filenamesIndices: number[] = [];
+      headers.forEach((header, index) => {
+        if (header?.toLowerCase().includes('filenames')) {
+          filenamesIndices.push(index);
+        }
+      });
 
-
-      if (humanIndex === -1 || aiIndex === -1 || filenamesIndex === -1) {
+      if (humanIndex === -1 || aiIndex === -1 || filenamesIndices.length === 0) {
         continue;
       }
 
       // Map rows to clean objects
-      //here this is the code to split the filenames into image paths
+      // Combine filenames from all Filenames_X columns into imagePaths
       const data = jsonData.slice(1).map((row: any, index: number) => {
         const rowArray = row as any[];
+        
+        // Combine all filenames from all Filenames_X columns
+        const allFilenames: string[] = [];
+        const filenamesStrings: string[] = [];
+        
+        filenamesIndices.forEach(filenamesIndex => {
+          const filenamesValue = rowArray[filenamesIndex] || '';
+          if (filenamesValue && typeof filenamesValue === 'string') {
+            filenamesStrings.push(filenamesValue);
+            // Split by comma and add to combined list
+            const splitFilenames = filenamesValue
+              .split(',')
+              .map((f: string) => f.trim())
+              .filter(Boolean);
+            allFilenames.push(...splitFilenames);
+          }
+        });
+        
+        // Join all filenames strings for backward compatibility (if needed)
+        const combinedFilenamesString = filenamesStrings.join(',');
         
         return {
           human: rowArray[humanIndex] || '',
           ai: rowArray[aiIndex] || '',
-          filenames: rowArray[filenamesIndex] || '',
-          imagePaths: (rowArray[filenamesIndex] || '')
-            .split(',')
-            .map((f: string) => f.trim())
-            .filter(Boolean),
+          filenames: combinedFilenamesString,
+          imagePaths: allFilenames, // All filenames from all Filenames_X columns combined
           tags: [],
           isSelected: false
         };
@@ -74,7 +97,7 @@ export async function POST(request: NextRequest) {
 
     if (results.length === 0) {
       return NextResponse.json(
-        { error: 'No valid sheets found with Human/AI/Filenames columns' },
+        { error: 'No valid sheets found with Human/AI/Filenames columns (supports Filenames, Filenames_1, Filenames_2, etc.)' },
         { status: 400 }
       );
     }
