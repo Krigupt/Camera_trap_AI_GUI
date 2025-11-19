@@ -34,7 +34,9 @@ export async function POST(request: NextRequest) {
       'Low-light', 
       'Body part',
       'Blends in',
-      'Unidentifiable to taxonomix level by human ground-truth'
+      'Unidentifiable to taxonomix level by human ground-truth',
+      'Other',
+      'Similar species that does not occur in the area'
     ];
 
     // Process each unique sheet
@@ -54,7 +56,9 @@ export async function POST(request: NextRequest) {
               'Low-light': [],
               'Body part': [], 
               'Blends in': [],
-              'Unidentifiable to taxonomix level by human ground-truth': []
+              'Unidentifiable to taxonomix level by human ground-truth': [],
+              'Other': [],
+              'Similar species that does not occur in the area': []
             }
           });
         }
@@ -109,7 +113,9 @@ export async function POST(request: NextRequest) {
         { wch: 35 }, // Low-light
         { wch: 35 }, // Body part
         { wch: 35 }, // Blends in
-        { wch: 65 }, // Unidentifiable... (increased from 40 to 65)
+        { wch: 65 }, // Unidentifiable...
+        { wch: 35 }, // Other
+        { wch: 45 }, // Similar species...
         { wch: 35 }  // Notable images
       ];
       worksheet['!cols'] = columnWidths;

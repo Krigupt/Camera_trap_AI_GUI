@@ -33,7 +33,9 @@ const TAGS = [
   'Low-light',
   'Body part',
   'Blends in',
-  'Unidentifiable to taxonomix level by human ground-truth'
+  'Unidentifiable to taxonomix level by human ground-truth',
+  'Other',
+  'Similar species that does not occur in the area'
 ];
 
 const SPECIES_LIST = [
