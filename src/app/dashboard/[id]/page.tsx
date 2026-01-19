@@ -33,7 +33,7 @@ const TAGS = [
   'Low-light',
   'Body part',
   'Blends in',
-  'Unidentifiable to taxonomix level by human ground-truth',
+  'Unidentifiable to taxonomic level by human ground-truth',
   'Other',
   'Similar species that does not occur in the area'
 ];
