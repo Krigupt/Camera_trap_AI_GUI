@@ -13,17 +13,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Filename is required' }, { status: 400 });
     }
 
-    // Get all sheets for this filename
-    const allSheets = await ExcelData.find({ filename }).sort({ sheetName: 1 });
+    // Get all sheets for this filename (without sort to avoid memory limit issues)
+    const allSheets = await ExcelData.find({ filename });
     
     if (allSheets.length === 0) {
       return NextResponse.json({ error: 'No data found for this file' }, { status: 404 });
     }
 
-    // Filter for unique sheet names to avoid duplicates
-    const uniqueSheets = allSheets.filter((sheet, index, self) => 
-      index === self.findIndex(s => s.sheetName === sheet.sheetName)
-    );
+    // Filter for unique sheet names to avoid duplicates and sort in JavaScript
+    const uniqueSheets = allSheets
+      .filter((sheet, index, self) => 
+        index === self.findIndex(s => s.sheetName === sheet.sheetName)
+      )
+      .sort((a, b) => (a.sheetName || '').localeCompare(b.sheetName || ''));
 
     // Create a new workbook
     const workbook = XLSX.utils.book_new();
@@ -34,7 +36,7 @@ export async function POST(request: NextRequest) {
       'Low-light', 
       'Body part',
       'Blends in',
-      'Unidentifiable to taxonomix level by human ground-truth',
+      'Unidentifiable to taxonomic level by human ground-truth',
       'Other',
       'Similar species that does not occur in the area'
     ];
@@ -56,7 +58,7 @@ export async function POST(request: NextRequest) {
               'Low-light': [],
               'Body part': [], 
               'Blends in': [],
-              'Unidentifiable to taxonomix level by human ground-truth': [],
+              'Unidentifiable to taxonomic level by human ground-truth': [],
               'Other': [],
               'Similar species that does not occur in the area': []
             }
