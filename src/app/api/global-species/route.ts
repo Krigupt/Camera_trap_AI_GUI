@@ -8,45 +8,50 @@ export async function PUT(request: NextRequest) {
     
     const { filename, imagePath, species } = await request.json();
 
-    if (!filename || !imagePath || !species) {
+    // Allow empty string for clearing, but check for undefined/null
+    if (!filename || !imagePath || species === undefined || species === null) {
       return NextResponse.json({ 
         error: 'Missing required fields: filename, imagePath, species' 
       }, { status: 400 });
     }
 
 
-    // Find all sheets with this filename
-    const allSheets = await ExcelData.find({ filename });
+    // Use atomic update to prevent race conditions when multiple taggers work on the same batch
+    // This ensures that concurrent updates don't overwrite each other
+    let updateResult;
     
-    if (allSheets.length === 0) {
+    if (species === '' || species === 'CLEAR_SELECTION') {
+      // Clear the species classification using $unset
+      updateResult = await ExcelData.updateMany(
+        { filename },
+        {
+          $unset: {
+            [`globalImageSpecies.${imagePath}`]: ""
+          }
+        }
+      );
+    } else {
+      // Clean species string to fix encoding issues and set it using atomic $set
+      const cleanSpecies = species.replace(/‚Äî/g, '-').replace(/—/g, '-');
+      updateResult = await ExcelData.updateMany(
+        { filename },
+        {
+          $set: {
+            [`globalImageSpecies.${imagePath}`]: cleanSpecies
+          }
+        }
+      );
+    }
+    
+    if (updateResult.matchedCount === 0) {
       return NextResponse.json({ 
         error: 'No sheets found for filename' 
       }, { status: 404 });
     }
 
-
-    // Update global species for all sheets with this filename
-    for (const sheet of allSheets) {
-      if (!sheet.globalImageSpecies) {
-        sheet.globalImageSpecies = {};
-      }
-      
-      if (species === '' || species === 'CLEAR_SELECTION') {
-        // Clear the species classification
-        delete sheet.globalImageSpecies[imagePath];
-      } else {
-        // Clean species string to fix encoding issues and set it
-        const cleanSpecies = species.replace(/‚Äî/g, '-').replace(/—/g, '-');
-        sheet.globalImageSpecies[imagePath] = cleanSpecies;
-      }
-      
-      sheet.markModified('globalImageSpecies'); // Force Mongoose to detect changes
-      await sheet.save();
-    }
-
     return NextResponse.json({ 
       success: true,
-      sheetsUpdated: allSheets.length
+      documentsUpdated: updateResult.modifiedCount
     });
     
   } catch (error) {

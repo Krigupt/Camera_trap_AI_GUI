@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ImageIcon, TagIcon, DownloadIcon, ArrowLeft } from 'lucide-react';
 
@@ -267,12 +267,20 @@ export default function DashboardPage() {
   const [isExporting, setIsExporting] = useState(false);
   const [sheetImageTags, setSheetImageTags] = useState<{ [imagePath: string]: string[] }>({});
   const [globalImageSpecies, setGlobalImageSpecies] = useState<{ [imagePath: string]: string }>({});
+  // Ref to track previous species value for rollback
+  const previousSpeciesRef = useRef<{ [imagePath: string]: string | undefined }>({});
   const [showDownloadOptions, setShowDownloadOptions] = useState(false);
   const [downloadOptions, setDownloadOptions] = useState({
     taggedExcel: true,
     updatedCsv: true,
     originalData: false
   });
+  // Track saving state for tags (imagePath -> tag -> saving)
+  const [tagSavingState, setTagSavingState] = useState<{ [key: string]: boolean }>({});
+  // Track saving state for species classification (imagePath -> saving)
+  const [speciesSavingState, setSpeciesSavingState] = useState<{ [imagePath: string]: boolean }>({});
+  // Notification state
+  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   // Fetch sheet-specific image tags
   const fetchSheetTags = useCallback(async (filename: string, sheetName: string) => {
@@ -375,22 +383,29 @@ export default function DashboardPage() {
   const handleTagSelect = useCallback(async (rowIndex: number, tag: string, imagePath: string) => {
     if (!excelData) return;
 
-    // Update sheet-specific tags
-    const updatedSheetTags = { ...sheetImageTags };
+    // Create a unique key for this tag operation
+    const savingKey = `${imagePath}-${tag}`;
     
-    // Initialize tags for this specific image if they don't exist
-    if (!updatedSheetTags[imagePath]) {
-      updatedSheetTags[imagePath] = [];
-    }
-    
-    // Toggle the tag for this specific image
-    if (updatedSheetTags[imagePath].includes(tag)) {
-      updatedSheetTags[imagePath] = updatedSheetTags[imagePath].filter(t => t !== tag);
-    } else {
-      updatedSheetTags[imagePath].push(tag);
-    }
+    // Set loading state
+    setTagSavingState(prev => ({ ...prev, [savingKey]: true }));
 
-    setSheetImageTags(updatedSheetTags);
+    // Calculate the new tags state using functional update to avoid stale closures
+    let newTags: string[] = [];
+    setSheetImageTags(prevTags => {
+      const currentImageTags = prevTags[imagePath] || [];
+      
+      // Toggle the tag for this specific image
+      if (currentImageTags.includes(tag)) {
+        newTags = currentImageTags.filter(t => t !== tag);
+      } else {
+        newTags = [...currentImageTags, tag];
+      }
+      
+      return {
+        ...prevTags,
+        [imagePath]: newTags
+      };
+    });
 
     try {
       // Update sheet-specific tags on the server
@@ -401,32 +416,147 @@ export default function DashboardPage() {
           filename: excelData.filename,
           sheetName: excelData.sheetName,
           imagePath,
-          tags: updatedSheetTags[imagePath]
+          tags: newTags
         })
       });
+      
+      // Check if response is successful before parsing JSON
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {
+          errorData = { error: errorText || 'Unknown error' };
+        }
+        console.error('Failed to update sheet-specific tags:', errorData);
+        
+        // Rollback optimistic update on failure
+        setSheetImageTags(prevTags => {
+          const currentImageTags = prevTags[imagePath] || [];
+          // Revert to previous state
+          if (newTags.includes(tag) && !currentImageTags.includes(tag)) {
+            // Tag was added, remove it
+            return {
+              ...prevTags,
+              [imagePath]: currentImageTags.filter(t => t !== tag)
+            };
+          } else if (!newTags.includes(tag) && currentImageTags.includes(tag)) {
+            // Tag was removed, add it back
+            return {
+              ...prevTags,
+              [imagePath]: [...currentImageTags, tag]
+            };
+          }
+          return prevTags;
+        });
+        
+        // Show error notification
+        setNotification({ 
+          message: `Failed to save tag "${tag}": ${errorData.error || 'Network error'}`, 
+          type: 'error' 
+        });
+        setTimeout(() => setNotification(null), 5000);
+        return;
+      }
       
       const result = await response.json();
       if (!result.success) {
         console.error('Failed to update sheet-specific tags:', result);
+        
+        // Rollback optimistic update on failure
+        setSheetImageTags(prevTags => {
+          const currentImageTags = prevTags[imagePath] || [];
+          if (newTags.includes(tag) && !currentImageTags.includes(tag)) {
+            return {
+              ...prevTags,
+              [imagePath]: currentImageTags.filter(t => t !== tag)
+            };
+          } else if (!newTags.includes(tag) && currentImageTags.includes(tag)) {
+            return {
+              ...prevTags,
+              [imagePath]: [...currentImageTags, tag]
+            };
+          }
+          return prevTags;
+        });
+        
+        // Show error notification
+        setNotification({ 
+          message: `Failed to save tag "${tag}": ${result.error || 'Unknown error'}`, 
+          type: 'error' 
+        });
+        setTimeout(() => setNotification(null), 5000);
+      } else {
+        // Show success notification
+        setNotification({ 
+          message: `Tag "${tag}" saved successfully`, 
+          type: 'success' 
+        });
+        setTimeout(() => setNotification(null), 3000);
       }
     } catch (error) {
       console.error('Error updating sheet-specific tags:', error);
+      
+      // Rollback optimistic update on network error
+      setSheetImageTags(prevTags => {
+        const currentImageTags = prevTags[imagePath] || [];
+        if (newTags.includes(tag) && !currentImageTags.includes(tag)) {
+          return {
+            ...prevTags,
+            [imagePath]: currentImageTags.filter(t => t !== tag)
+          };
+        } else if (!newTags.includes(tag) && currentImageTags.includes(tag)) {
+          return {
+            ...prevTags,
+            [imagePath]: [...currentImageTags, tag]
+          };
+        }
+        return prevTags;
+      });
+      
+      // Show error notification
+      setNotification({ 
+        message: `Failed to save tag "${tag}": ${error instanceof Error ? error.message : 'Network error'}`, 
+        type: 'error' 
+      });
+      setTimeout(() => setNotification(null), 5000);
+    } finally {
+      // Clear loading state
+      setTagSavingState(prev => {
+        const newState = { ...prev };
+        delete newState[savingKey];
+        return newState;
+      });
     }
-  }, [excelData, sheetImageTags]);
+  }, [excelData]);
 
   // Handle species classification
   const handleSpeciesClassification = useCallback(async (rowIndex: number, species: string, imagePath: string) => {
     if (!excelData) return;
 
+    // Set loading state
+    setSpeciesSavingState(prev => ({ ...prev, [imagePath]: true }));
+
+    // Capture previous value for rollback using functional update
+    let previousSpecies: string | undefined = undefined;
+    setGlobalImageSpecies(prevSpecies => {
+      previousSpecies = prevSpecies[imagePath];
+      return prevSpecies; // Don't change state, just capture previous value
+    });
+
     // Handle clear selection
     if (species === 'CLEAR_SELECTION') {
-      const updatedSpecies = { ...globalImageSpecies };
-      delete updatedSpecies[imagePath];
-      setGlobalImageSpecies(updatedSpecies);
+      // Update UI optimistically using functional update
+      setGlobalImageSpecies(prevSpecies => {
+        const updated = { ...prevSpecies };
+        delete updated[imagePath];
+        return updated;
+      });
       
-      // Clear from database as well
+      // Clear from database
       try {
-        await fetch('/api/global-species', {
+        const response = await fetch('/api/global-species', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
@@ -435,16 +565,85 @@ export default function DashboardPage() {
             species: '' // Empty string to clear
           })
         });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          let errorData;
+          try {
+            errorData = JSON.parse(errorText);
+          } catch {
+            errorData = { error: errorText || 'Unknown error' };
+          }
+          
+          // Rollback optimistic update
+          setGlobalImageSpecies(prevSpecies => {
+            if (previousSpecies) {
+              return { ...prevSpecies, [imagePath]: previousSpecies };
+            }
+            return prevSpecies;
+          });
+          
+          setNotification({ 
+            message: `Failed to clear species: ${errorData.error || 'Network error'}`, 
+            type: 'error' 
+          });
+          setTimeout(() => setNotification(null), 5000);
+          return;
+        }
+
+        const result = await response.json();
+        if (!result.success) {
+          // Rollback optimistic update
+          setGlobalImageSpecies(prevSpecies => {
+            if (previousSpecies) {
+              return { ...prevSpecies, [imagePath]: previousSpecies };
+            }
+            return prevSpecies;
+          });
+          
+          setNotification({ 
+            message: `Failed to clear species: ${result.error || 'Unknown error'}`, 
+            type: 'error' 
+          });
+          setTimeout(() => setNotification(null), 5000);
+        } else {
+          setNotification({ 
+            message: 'Species classification cleared successfully', 
+            type: 'success' 
+          });
+          setTimeout(() => setNotification(null), 3000);
+        }
       } catch (error) {
         console.error('Error clearing species classification:', error);
+        
+        // Rollback optimistic update
+        setGlobalImageSpecies(prevSpecies => {
+          if (previousSpecies) {
+            return { ...prevSpecies, [imagePath]: previousSpecies };
+          }
+          return prevSpecies;
+        });
+        
+        setNotification({ 
+          message: `Failed to clear species: ${error instanceof Error ? error.message : 'Network error'}`, 
+          type: 'error' 
+        });
+        setTimeout(() => setNotification(null), 5000);
+      } finally {
+        setSpeciesSavingState(prev => {
+          const newState = { ...prev };
+          delete newState[imagePath];
+          return newState;
+        });
       }
       return;
     }
 
-    // Update local state immediately
-    const updatedSpecies = { ...globalImageSpecies };
-    updatedSpecies[imagePath] = species;
-    setGlobalImageSpecies(updatedSpecies);
+    // Update local state immediately using functional update
+    setGlobalImageSpecies(prevSpecies => ({
+      ...prevSpecies,
+      [imagePath]: species
+    }));
 
     try {
       // Update species classification on the server (CSV)
@@ -470,25 +669,119 @@ export default function DashboardPage() {
         })
       });
       
+      // Check CSV response
+      if (!csvResponse.ok) {
+        const errorText = await csvResponse.text();
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {
+          errorData = { error: errorText || 'Unknown error' };
+        }
+        
+        // Rollback optimistic update
+        setGlobalImageSpecies(prevSpecies => {
+          const updated = { ...prevSpecies };
+          if (previousSpecies) {
+            updated[imagePath] = previousSpecies;
+          } else {
+            delete updated[imagePath];
+          }
+          return updated;
+        });
+        
+        setNotification({ 
+          message: `Failed to save species: ${errorData.error || 'Network error'}`, 
+          type: 'error' 
+        });
+        setTimeout(() => setNotification(null), 5000);
+        return;
+      }
+
+      // Check global response
+      if (!globalResponse.ok) {
+        const errorText = await globalResponse.text();
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {
+          errorData = { error: errorText || 'Unknown error' };
+        }
+        
+        // Rollback optimistic update
+        setGlobalImageSpecies(prevSpecies => {
+          const updated = { ...prevSpecies };
+          if (previousSpecies) {
+            updated[imagePath] = previousSpecies;
+          } else {
+            delete updated[imagePath];
+          }
+          return updated;
+        });
+        
+        setNotification({ 
+          message: `Failed to save species: ${errorData.error || 'Network error'}`, 
+          type: 'error' 
+        });
+        setTimeout(() => setNotification(null), 5000);
+        return;
+      }
+      
       const csvResult = await csvResponse.json();
       const globalResult = await globalResponse.json();
       
       if (!csvResult.success || !globalResult.success) {
-        // Revert local state if server update failed
-        const revertedSpecies = { ...globalImageSpecies };
-        delete revertedSpecies[imagePath];
-        setGlobalImageSpecies(revertedSpecies);
-        alert('Failed to update species classification. Please try again.');
+        // Rollback optimistic update
+        setGlobalImageSpecies(prevSpecies => {
+          const updated = { ...prevSpecies };
+          if (previousSpecies) {
+            updated[imagePath] = previousSpecies;
+          } else {
+            delete updated[imagePath];
+          }
+          return updated;
+        });
+        
+        setNotification({ 
+          message: `Failed to save species: ${csvResult.error || globalResult.error || 'Unknown error'}`, 
+          type: 'error' 
+        });
+        setTimeout(() => setNotification(null), 5000);
+      } else {
+        setNotification({ 
+          message: `Species "${species}" saved successfully`, 
+          type: 'success' 
+        });
+        setTimeout(() => setNotification(null), 3000);
       }
     } catch (error) {
       console.error('Error updating species classification:', error);
-      // Revert local state on error
-      const revertedSpecies = { ...globalImageSpecies };
-      delete revertedSpecies[imagePath];
-      setGlobalImageSpecies(revertedSpecies);
-      alert('Error updating species classification. Please try again.');
+      
+      // Rollback optimistic update
+      setGlobalImageSpecies(prevSpecies => {
+        const updated = { ...prevSpecies };
+        if (previousSpecies) {
+          updated[imagePath] = previousSpecies;
+        } else {
+          delete updated[imagePath];
+        }
+        return updated;
+      });
+      
+      setNotification({ 
+        message: `Failed to save species: ${error instanceof Error ? error.message : 'Network error'}`, 
+        type: 'error' 
+      });
+      setTimeout(() => setNotification(null), 5000);
+    } finally {
+      // Clear loading state
+      setSpeciesSavingState(prev => {
+        const newState = { ...prev };
+        delete newState[imagePath];
+        return newState;
+      });
     }
-  }, [excelData, globalImageSpecies]);
+  }, [excelData]);
 
   // Handle export tagged data (show download options)
   const handleExportTaggedData = useCallback(async () => {
@@ -609,6 +902,38 @@ export default function DashboardPage() {
     );
   }
 
+  // Notification component
+  const NotificationToast = notification && (
+    <div className={`fixed top-20 right-4 z-50 p-4 rounded-lg shadow-lg max-w-md animate-in slide-in-from-top-5 ${
+      notification.type === 'success' 
+        ? 'bg-green-50 border border-green-200 text-green-800' 
+        : 'bg-red-50 border border-red-200 text-red-800'
+    }`}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center">
+          {notification.type === 'success' ? (
+            <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+            </svg>
+          ) : (
+            <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+            </svg>
+          )}
+          <span className="text-sm font-medium">{notification.message}</span>
+        </div>
+        <button
+          onClick={() => setNotification(null)}
+          className="ml-4 text-gray-400 hover:text-gray-600"
+        >
+          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  );
+
   if (!excelData) {
     return (
       <div className="min-h-screen bg-gray-50">
@@ -632,6 +957,9 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Notification Toast */}
+      {NotificationToast}
+      
       <Navbar 
         selectedSheet={selectedSheet} 
         sheets={sheets} 
@@ -801,16 +1129,25 @@ export default function DashboardPage() {
                   {TAGS.map((tag) => {
                     const currentImagePath = currentRowData.imagePaths[currentImageIndex];
                     const isChecked = sheetImageTags[currentImagePath]?.includes(tag) || false;
+                    const savingKey = `${currentImagePath}-${tag}`;
+                    const isSaving = tagSavingState[savingKey] || false;
                     
                     return (
-                      <label key={tag} className="flex items-center">
+                      <label key={tag} className="flex items-center relative">
                         <input
                           type="checkbox"
                           checked={isChecked}
                           onChange={() => handleTagSelect(selectedRow!, tag, currentImagePath)}
-                          className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded mr-2"
+                          disabled={isSaving}
+                          className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded mr-2 disabled:opacity-50 disabled:cursor-not-allowed"
                         />
-                        <span className="text-sm text-gray-700">{tag}</span>
+                        <span className="text-sm text-gray-700 flex-1">{tag}</span>
+                        {isSaving && (
+                          <span className="ml-2 text-xs text-blue-600 flex items-center">
+                            <span className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600 mr-1"></span>
+                            Saving...
+                          </span>
+                        )}
                       </label>
                     );
                   })}
@@ -825,21 +1162,30 @@ export default function DashboardPage() {
                 <div className="mb-3 p-2 bg-green-50 rounded text-xs text-green-700">
                   Update species for: {currentRowData.imagePaths[currentImageIndex]}
                 </div>
-                <select 
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  value={globalImageSpecies[currentRowData.imagePaths[currentImageIndex]] || ""}
-                  onChange={(e) => handleSpeciesClassification(selectedRow!, e.target.value, currentRowData.imagePaths[currentImageIndex])}
-                >
-                  <option value="" disabled>Select Species Classification</option>
-                  <option value="CLEAR_SELECTION" className="text-red-600 font-medium">
-                    ✕ Clear Selection
-                  </option>
-                  {SPECIES_LIST.map((species) => (
-                    <option key={species} value={species}>
-                      {species}
+                <div className="relative">
+                  <select 
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-100"
+                    value={globalImageSpecies[currentRowData.imagePaths[currentImageIndex]] || ""}
+                    onChange={(e) => handleSpeciesClassification(selectedRow!, e.target.value, currentRowData.imagePaths[currentImageIndex])}
+                    disabled={speciesSavingState[currentRowData.imagePaths[currentImageIndex]] || false}
+                  >
+                    <option value="" disabled>Select Species Classification</option>
+                    <option value="CLEAR_SELECTION" className="text-red-600 font-medium">
+                      ✕ Clear Selection
                     </option>
-                  ))}
-                </select>
+                    {SPECIES_LIST.map((species) => (
+                      <option key={species} value={species}>
+                        {species}
+                      </option>
+                    ))}
+                  </select>
+                  {speciesSavingState[currentRowData.imagePaths[currentImageIndex]] && (
+                    <div className="absolute right-3 top-1/2 transform -translate-y-1/2 flex items-center text-blue-600">
+                      <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></span>
+                      <span className="text-xs">Saving...</span>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>

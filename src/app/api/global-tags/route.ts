@@ -12,31 +12,25 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Filename, sheetName, and imagePath are required' }, { status: 400 });
     }
 
-    // Find all sheets for this filename
-    const allSheets = await ExcelData.find({ filename });
+    // Use atomic update to prevent race conditions when multiple taggers work on the same batch
+    // This ensures that concurrent updates don't overwrite each other
+    const updateResult = await ExcelData.updateMany(
+      { filename },
+      {
+        $set: {
+          [`sheetSpecificImageTags.${sheetName}.${imagePath}`]: tags
+        }
+      }
+    );
     
-    if (!allSheets || allSheets.length === 0) {
+    if (updateResult.matchedCount === 0) {
       return NextResponse.json({ error: 'No data found for this filename' }, { status: 404 });
     }
 
-    // Update sheet-specific tags for all sheets of this file
-    for (const sheet of allSheets) {
-      if (!sheet.sheetSpecificImageTags) {
-        sheet.sheetSpecificImageTags = {};
-      }
-      
-      // Initialize the sheetName object if it doesn't exist
-      if (!sheet.sheetSpecificImageTags[sheetName]) {
-        sheet.sheetSpecificImageTags[sheetName] = {};
-      }
-      
-      // Update tags for this specific image in this specific sheet
-      sheet.sheetSpecificImageTags[sheetName][imagePath] = tags;
-      sheet.markModified('sheetSpecificImageTags'); // Force Mongoose to detect changes
-      await sheet.save();
-    }
-
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ 
+      success: true,
+      documentsUpdated: updateResult.modifiedCount 
+    });
   } catch (error) {
     console.error('Error updating sheet-specific tags:', error);
     return NextResponse.json({ error: 'Failed to update sheet-specific tags' }, { status: 500 });
