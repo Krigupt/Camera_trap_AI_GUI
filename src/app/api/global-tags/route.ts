@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import ExcelData from '@/models/ExcelData';
 
+// Allow more time for cold start + MongoDB on Vercel serverless (avoids "---" / timeout)
+export const maxDuration = 30;
+
 export async function PUT(request: NextRequest) {
   try {
     await connectDB();
@@ -12,13 +15,17 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Filename, sheetName, and imagePath are required' }, { status: 400 });
     }
 
+    // Escape dots in imagePath for MongoDB (dots are interpreted as nested paths)
+    // Replace "." with Unicode fullwidth full stop which won't appear in filenames
+    const escapedImagePath = imagePath.replace(/\./g, '\uff0e');
+
     // Use atomic update to prevent race conditions when multiple taggers work on the same batch
     // This ensures that concurrent updates don't overwrite each other
     const updateResult = await ExcelData.updateMany(
       { filename },
       {
         $set: {
-          [`sheetSpecificImageTags.${sheetName}.${imagePath}`]: tags
+          [`sheetSpecificImageTags.${sheetName}.${escapedImagePath}`]: tags
         }
       }
     );
@@ -56,10 +63,24 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'No data found for this filename' }, { status: 404 });
     }
 
-    // Get tags for this specific sheet
-    const sheetTags = sheet.sheetSpecificImageTags?.[sheetName] || {};
+    // Get tags for this specific sheet (keys have escaped dots, need to unescape for response)
+    const rawSheetTags = sheet.sheetSpecificImageTags?.[sheetName] || {};
+    
+    // Unescape dots in imagePath keys (convert Unicode fullwidth full stop back to regular dot)
+    // Also skip old corrupted entries that are objects instead of arrays
+    const sheetTags: { [key: string]: string[] } = {};
+    for (const [escapedKey, value] of Object.entries(rawSheetTags)) {
+      // Skip corrupted entries (objects instead of arrays from old data)
+      if (!Array.isArray(value)) {
+        continue;
+      }
+      const originalKey = escapedKey.replace(/\uff0e/g, '.');
+      sheetTags[originalKey] = value as string[];
+    }
 
-    return NextResponse.json({ sheetImageTags: sheetTags });
+    return NextResponse.json({ sheetImageTags: sheetTags }, {
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
+    });
   } catch (error) {
     console.error('Error fetching sheet-specific tags:', error);
     return NextResponse.json({ error: 'Failed to fetch sheet-specific tags' }, { status: 500 });

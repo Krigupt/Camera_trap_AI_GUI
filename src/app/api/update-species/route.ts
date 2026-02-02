@@ -4,6 +4,8 @@ import ExcelData from '@/models/ExcelData';
 import CsvData from '@/models/CsvData';
 import path from 'path';
 
+export const maxDuration = 30;
+
 export async function PUT(request: NextRequest) {
   try {
     await connectDB();

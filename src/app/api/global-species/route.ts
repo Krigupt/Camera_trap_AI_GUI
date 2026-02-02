@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import ExcelData from '@/models/ExcelData';
 
+// Allow more time for cold start + MongoDB on Vercel serverless (avoids "---" / timeout)
+export const maxDuration = 30;
+
 export async function PUT(request: NextRequest) {
   try {
     await connectDB();
@@ -15,6 +18,9 @@ export async function PUT(request: NextRequest) {
       }, { status: 400 });
     }
 
+    // Escape dots in imagePath for MongoDB (dots are interpreted as nested paths)
+    // Replace "." with Unicode fullwidth full stop which won't appear in filenames
+    const escapedImagePath = imagePath.replace(/\./g, '\uff0e');
 
     // Use atomic update to prevent race conditions when multiple taggers work on the same batch
     // This ensures that concurrent updates don't overwrite each other
@@ -26,7 +32,7 @@ export async function PUT(request: NextRequest) {
         { filename },
         {
           $unset: {
-            [`globalImageSpecies.${imagePath}`]: ""
+            [`globalImageSpecies.${escapedImagePath}`]: ""
           }
         }
       );
@@ -37,7 +43,7 @@ export async function PUT(request: NextRequest) {
         { filename },
         {
           $set: {
-            [`globalImageSpecies.${imagePath}`]: cleanSpecies
+            [`globalImageSpecies.${escapedImagePath}`]: cleanSpecies
           }
         }
       );
@@ -84,18 +90,22 @@ export async function GET(request: NextRequest) {
       }, { status: 404 });
     }
 
-    // Clean any existing encoding issues in the retrieved data
-    const cleanGlobalImageSpecies = {};
+    // Clean any existing encoding issues and unescape dots in imagePath keys
+    const cleanGlobalImageSpecies: { [key: string]: string } = {};
     if (sheet.globalImageSpecies) {
-      for (const [imagePath, species] of Object.entries(sheet.globalImageSpecies)) {
-        (cleanGlobalImageSpecies as any)[imagePath] = typeof species === 'string'
+      for (const [escapedImagePath, species] of Object.entries(sheet.globalImageSpecies)) {
+        // Unescape dots (convert Unicode fullwidth full stop back to regular dot)
+        const originalImagePath = escapedImagePath.replace(/\uff0e/g, '.');
+        cleanGlobalImageSpecies[originalImagePath] = typeof species === 'string'
           ? species.replace(/‚Äî/g, '-').replace(/—/g, '-')
-          : species;
+          : species as string;
       }
     }
 
     return NextResponse.json({ 
       globalImageSpecies: cleanGlobalImageSpecies
+    }, {
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
     
   } catch (error) {

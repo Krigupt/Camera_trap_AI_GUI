@@ -76,6 +76,13 @@ const getImagePaths = (row: ExcelData['data'][0] | undefined | null): string[] =
   return [];
 };
 
+// Fetch with timeout so serverless timeouts (e.g. Vercel "---") surface as errors
+const fetchWithTimeout = (url: string, options: RequestInit, timeoutMs = 25000): Promise<Response> => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timeout));
+};
+
 // Navbar component to avoid duplication
 const Navbar = ({ selectedSheet, sheets, onSheetChange, onExport, isExporting, onBack }: {
   selectedSheet: string;
@@ -266,9 +273,11 @@ export default function DashboardPage() {
   const [currentImageIndex, setCurrentImageIndex] = useState<number>(0);
   const [isExporting, setIsExporting] = useState(false);
   const [sheetImageTags, setSheetImageTags] = useState<{ [imagePath: string]: string[] }>({});
+  // Ref to track current sheetImageTags for synchronous access (React 18 batches state updates)
+  const sheetImageTagsRef = useRef<{ [imagePath: string]: string[] }>({});
   const [globalImageSpecies, setGlobalImageSpecies] = useState<{ [imagePath: string]: string }>({});
-  // Ref to track previous species value for rollback
-  const previousSpeciesRef = useRef<{ [imagePath: string]: string | undefined }>({});
+  // Ref to track current globalImageSpecies for synchronous access (React 18 batches state updates)
+  const globalImageSpeciesRef = useRef<{ [imagePath: string]: string }>({});
   const [showDownloadOptions, setShowDownloadOptions] = useState(false);
   const [downloadOptions, setDownloadOptions] = useState({
     taggedExcel: true,
@@ -282,13 +291,20 @@ export default function DashboardPage() {
   // Notification state
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
+  // Keep sheetImageTagsRef in sync with state (for synchronous access in callbacks)
+  useEffect(() => {
+    sheetImageTagsRef.current = sheetImageTags;
+  }, [sheetImageTags]);
+
   // Fetch sheet-specific image tags
   const fetchSheetTags = useCallback(async (filename: string, sheetName: string) => {
     try {
-      const response = await fetch(`/api/global-tags?filename=${encodeURIComponent(filename)}&sheetName=${encodeURIComponent(sheetName)}`);
+      const response = await fetch(`/api/global-tags?filename=${encodeURIComponent(filename)}&sheetName=${encodeURIComponent(sheetName)}`, { cache: 'no-store' });
       if (response.ok) {
         const data = await response.json();
-        setSheetImageTags(data.sheetImageTags || {});
+        const tags = data.sheetImageTags || {};
+        setSheetImageTags(tags);
+        sheetImageTagsRef.current = tags; // Also update ref immediately
       } else {
         console.error('Failed to fetch sheet-specific tags:', response.status);
       }
@@ -297,13 +313,20 @@ export default function DashboardPage() {
     }
   }, []);
 
+  // Keep globalImageSpeciesRef in sync with state
+  useEffect(() => {
+    globalImageSpeciesRef.current = globalImageSpecies;
+  }, [globalImageSpecies]);
+
   // Fetch global image species
   const fetchGlobalSpecies = useCallback(async (filename: string) => {
     try {
-      const response = await fetch(`/api/global-species?filename=${encodeURIComponent(filename)}`);
+      const response = await fetch(`/api/global-species?filename=${encodeURIComponent(filename)}`, { cache: 'no-store' });
       if (response.ok) {
         const data = await response.json();
-        setGlobalImageSpecies(data.globalImageSpecies || {});
+        const species = data.globalImageSpecies || {};
+        setGlobalImageSpecies(species);
+        globalImageSpeciesRef.current = species; // Also update ref immediately
       }
     } catch (error) {
       console.error('Error fetching global species:', error);
@@ -389,27 +412,32 @@ export default function DashboardPage() {
     // Set loading state
     setTagSavingState(prev => ({ ...prev, [savingKey]: true }));
 
-    // Calculate the new tags state using functional update to avoid stale closures
-    let newTags: string[] = [];
-    setSheetImageTags(prevTags => {
-      const currentImageTags = prevTags[imagePath] || [];
-      
-      // Toggle the tag for this specific image
-      if (currentImageTags.includes(tag)) {
-        newTags = currentImageTags.filter(t => t !== tag);
-      } else {
-        newTags = [...currentImageTags, tag];
-      }
-      
-      return {
-        ...prevTags,
-        [imagePath]: newTags
-      };
-    });
+    // Calculate the new tags BEFORE state update using ref (React 18 batches state updates)
+    const previousImageTags = sheetImageTagsRef.current[imagePath] || [];
+    let newTags: string[];
+    
+    // Toggle the tag for this specific image
+    if (previousImageTags.includes(tag)) {
+      newTags = previousImageTags.filter(t => t !== tag);
+    } else {
+      newTags = [...previousImageTags, tag];
+    }
+    
+    // Update state and ref
+    const updatedTags = { ...sheetImageTagsRef.current, [imagePath]: newTags };
+    sheetImageTagsRef.current = updatedTags;
+    setSheetImageTags(updatedTags);
+    
+    // Helper function to rollback
+    const rollback = () => {
+      const rolledBackTags = { ...sheetImageTagsRef.current, [imagePath]: previousImageTags };
+      sheetImageTagsRef.current = rolledBackTags;
+      setSheetImageTags(rolledBackTags);
+    };
 
     try {
-      // Update sheet-specific tags on the server
-      const response = await fetch('/api/global-tags', {
+      // Update sheet-specific tags on the server (timeout to avoid hanging when Vercel returns "---")
+      const response = await fetchWithTimeout('/api/global-tags', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -432,24 +460,7 @@ export default function DashboardPage() {
         console.error('Failed to update sheet-specific tags:', errorData);
         
         // Rollback optimistic update on failure
-        setSheetImageTags(prevTags => {
-          const currentImageTags = prevTags[imagePath] || [];
-          // Revert to previous state
-          if (newTags.includes(tag) && !currentImageTags.includes(tag)) {
-            // Tag was added, remove it
-            return {
-              ...prevTags,
-              [imagePath]: currentImageTags.filter(t => t !== tag)
-            };
-          } else if (!newTags.includes(tag) && currentImageTags.includes(tag)) {
-            // Tag was removed, add it back
-            return {
-              ...prevTags,
-              [imagePath]: [...currentImageTags, tag]
-            };
-          }
-          return prevTags;
-        });
+        rollback();
         
         // Show error notification
         setNotification({ 
@@ -465,21 +476,7 @@ export default function DashboardPage() {
         console.error('Failed to update sheet-specific tags:', result);
         
         // Rollback optimistic update on failure
-        setSheetImageTags(prevTags => {
-          const currentImageTags = prevTags[imagePath] || [];
-          if (newTags.includes(tag) && !currentImageTags.includes(tag)) {
-            return {
-              ...prevTags,
-              [imagePath]: currentImageTags.filter(t => t !== tag)
-            };
-          } else if (!newTags.includes(tag) && currentImageTags.includes(tag)) {
-            return {
-              ...prevTags,
-              [imagePath]: [...currentImageTags, tag]
-            };
-          }
-          return prevTags;
-        });
+        rollback();
         
         // Show error notification
         setNotification({ 
@@ -497,27 +494,14 @@ export default function DashboardPage() {
       }
     } catch (error) {
       console.error('Error updating sheet-specific tags:', error);
+      const isTimeout = error instanceof Error && error.name === 'AbortError';
       
       // Rollback optimistic update on network error
-      setSheetImageTags(prevTags => {
-        const currentImageTags = prevTags[imagePath] || [];
-        if (newTags.includes(tag) && !currentImageTags.includes(tag)) {
-          return {
-            ...prevTags,
-            [imagePath]: currentImageTags.filter(t => t !== tag)
-          };
-        } else if (!newTags.includes(tag) && currentImageTags.includes(tag)) {
-          return {
-            ...prevTags,
-            [imagePath]: [...currentImageTags, tag]
-          };
-        }
-        return prevTags;
-      });
+      rollback();
       
-      // Show error notification
+      // Show error notification (include timeout message when Vercel returns "---")
       setNotification({ 
-        message: `Failed to save tag "${tag}": ${error instanceof Error ? error.message : 'Network error'}`, 
+        message: `Failed to save tag "${tag}": ${isTimeout ? 'Request timed out. Please try again.' : error instanceof Error ? error.message : 'Network error'}`, 
         type: 'error' 
       });
       setTimeout(() => setNotification(null), 5000);
@@ -538,25 +522,35 @@ export default function DashboardPage() {
     // Set loading state
     setSpeciesSavingState(prev => ({ ...prev, [imagePath]: true }));
 
-    // Capture previous value for rollback using functional update
-    let previousSpecies: string | undefined = undefined;
-    setGlobalImageSpecies(prevSpecies => {
-      previousSpecies = prevSpecies[imagePath];
-      return prevSpecies; // Don't change state, just capture previous value
-    });
+    // Capture previous value for rollback using ref (React 18 batches state updates)
+    const previousSpecies = globalImageSpeciesRef.current[imagePath];
+
+    // Helper function to rollback species
+    const rollbackSpecies = () => {
+      if (previousSpecies !== undefined) {
+        const rolledBack = { ...globalImageSpeciesRef.current, [imagePath]: previousSpecies };
+        globalImageSpeciesRef.current = rolledBack;
+        setGlobalImageSpecies(rolledBack);
+      } else {
+        // Previous was undefined, so just delete the entry
+        const rolledBack = { ...globalImageSpeciesRef.current };
+        delete rolledBack[imagePath];
+        globalImageSpeciesRef.current = rolledBack;
+        setGlobalImageSpecies(rolledBack);
+      }
+    };
 
     // Handle clear selection
     if (species === 'CLEAR_SELECTION') {
-      // Update UI optimistically using functional update
-      setGlobalImageSpecies(prevSpecies => {
-        const updated = { ...prevSpecies };
-        delete updated[imagePath];
-        return updated;
-      });
+      // Update UI and ref optimistically
+      const updatedSpecies = { ...globalImageSpeciesRef.current };
+      delete updatedSpecies[imagePath];
+      globalImageSpeciesRef.current = updatedSpecies;
+      setGlobalImageSpecies(updatedSpecies);
       
       // Clear from database
       try {
-        const response = await fetch('/api/global-species', {
+        const response = await fetchWithTimeout('/api/global-species', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
@@ -576,12 +570,7 @@ export default function DashboardPage() {
           }
           
           // Rollback optimistic update
-          setGlobalImageSpecies(prevSpecies => {
-            if (previousSpecies) {
-              return { ...prevSpecies, [imagePath]: previousSpecies };
-            }
-            return prevSpecies;
-          });
+          rollbackSpecies();
           
           setNotification({ 
             message: `Failed to clear species: ${errorData.error || 'Network error'}`, 
@@ -594,12 +583,7 @@ export default function DashboardPage() {
         const result = await response.json();
         if (!result.success) {
           // Rollback optimistic update
-          setGlobalImageSpecies(prevSpecies => {
-            if (previousSpecies) {
-              return { ...prevSpecies, [imagePath]: previousSpecies };
-            }
-            return prevSpecies;
-          });
+          rollbackSpecies();
           
           setNotification({ 
             message: `Failed to clear species: ${result.error || 'Unknown error'}`, 
@@ -617,12 +601,7 @@ export default function DashboardPage() {
         console.error('Error clearing species classification:', error);
         
         // Rollback optimistic update
-        setGlobalImageSpecies(prevSpecies => {
-          if (previousSpecies) {
-            return { ...prevSpecies, [imagePath]: previousSpecies };
-          }
-          return prevSpecies;
-        });
+        rollbackSpecies();
         
         setNotification({ 
           message: `Failed to clear species: ${error instanceof Error ? error.message : 'Network error'}`, 
@@ -639,15 +618,14 @@ export default function DashboardPage() {
       return;
     }
 
-    // Update local state immediately using functional update
-    setGlobalImageSpecies(prevSpecies => ({
-      ...prevSpecies,
-      [imagePath]: species
-    }));
+    // Update local state and ref immediately
+    const updatedSpecies = { ...globalImageSpeciesRef.current, [imagePath]: species };
+    globalImageSpeciesRef.current = updatedSpecies;
+    setGlobalImageSpecies(updatedSpecies);
 
     try {
       // Update species classification on the server (CSV)
-      const csvResponse = await fetch('/api/update-species', {
+      const csvResponse = await fetchWithTimeout('/api/update-species', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -659,7 +637,7 @@ export default function DashboardPage() {
       });
       
       // Update global species in database
-      const globalResponse = await fetch('/api/global-species', {
+      const globalResponse = await fetchWithTimeout('/api/global-species', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -680,15 +658,7 @@ export default function DashboardPage() {
         }
         
         // Rollback optimistic update
-        setGlobalImageSpecies(prevSpecies => {
-          const updated = { ...prevSpecies };
-          if (previousSpecies) {
-            updated[imagePath] = previousSpecies;
-          } else {
-            delete updated[imagePath];
-          }
-          return updated;
-        });
+        rollbackSpecies();
         
         setNotification({ 
           message: `Failed to save species: ${errorData.error || 'Network error'}`, 
@@ -709,15 +679,7 @@ export default function DashboardPage() {
         }
         
         // Rollback optimistic update
-        setGlobalImageSpecies(prevSpecies => {
-          const updated = { ...prevSpecies };
-          if (previousSpecies) {
-            updated[imagePath] = previousSpecies;
-          } else {
-            delete updated[imagePath];
-          }
-          return updated;
-        });
+        rollbackSpecies();
         
         setNotification({ 
           message: `Failed to save species: ${errorData.error || 'Network error'}`, 
@@ -732,15 +694,7 @@ export default function DashboardPage() {
       
       if (!csvResult.success || !globalResult.success) {
         // Rollback optimistic update
-        setGlobalImageSpecies(prevSpecies => {
-          const updated = { ...prevSpecies };
-          if (previousSpecies) {
-            updated[imagePath] = previousSpecies;
-          } else {
-            delete updated[imagePath];
-          }
-          return updated;
-        });
+        rollbackSpecies();
         
         setNotification({ 
           message: `Failed to save species: ${csvResult.error || globalResult.error || 'Unknown error'}`, 
@@ -756,20 +710,13 @@ export default function DashboardPage() {
       }
     } catch (error) {
       console.error('Error updating species classification:', error);
+      const isTimeout = error instanceof Error && error.name === 'AbortError';
       
       // Rollback optimistic update
-      setGlobalImageSpecies(prevSpecies => {
-        const updated = { ...prevSpecies };
-        if (previousSpecies) {
-          updated[imagePath] = previousSpecies;
-        } else {
-          delete updated[imagePath];
-        }
-        return updated;
-      });
+      rollbackSpecies();
       
       setNotification({ 
-        message: `Failed to save species: ${error instanceof Error ? error.message : 'Network error'}`, 
+        message: `Failed to save species: ${isTimeout ? 'Request timed out. Please try again.' : error instanceof Error ? error.message : 'Network error'}`, 
         type: 'error' 
       });
       setTimeout(() => setNotification(null), 5000);

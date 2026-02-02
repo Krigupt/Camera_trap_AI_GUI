@@ -70,12 +70,14 @@ export async function POST(request: NextRequest) {
         // Add filenames to appropriate tag columns based on sheet-specific image tags
         if (row.imagePaths) {
           row.imagePaths.forEach((imagePath: string) => {
+            // Escape dots in imagePath to match MongoDB storage format
+            const escapedImagePath = imagePath.replace(/\./g, '\uff0e');
             // Get sheet-specific tags for this image
-            const sheetTags = sheet.sheetSpecificImageTags?.[sheet.sheetName]?.[imagePath];
+            const sheetTags = sheet.sheetSpecificImageTags?.[sheet.sheetName]?.[escapedImagePath];
             if (sheetTags && sheetTags.length > 0) {
               sheetTags.forEach((tag: string) => {
                 if (group.taggedImages[tag]) {
-                  // Add this specific image to the tag column
+                  // Add this specific image to the tag column (use original imagePath for display)
                   if (!group.taggedImages[tag].includes(imagePath)) {
                     group.taggedImages[tag].push(imagePath);
                   }
