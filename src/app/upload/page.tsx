@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Upload, FileSpreadsheet, AlertCircle, Cloud } from 'lucide-react';
+import { Upload, FileSpreadsheet, AlertCircle, Cloud, ArrowLeft } from 'lucide-react';
 
 export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -101,41 +102,43 @@ export default function UploadPage() {
     setError(null);
 
     try {
-      // Upload Excel file first
       const excelFormData = new FormData();
       excelFormData.append('file', file);
       excelFormData.append('bucketName', selectedBucket);
 
-      const excelResponse = await fetch('/api/upload', {
+      const excelPromise = fetch('/api/upload', {
         method: 'POST',
         body: excelFormData,
+        credentials: 'include',
       });
+
+      const uploads: Promise<Response>[] = [excelPromise];
+      if (csvFile) {
+        const csvFormData = new FormData();
+        csvFormData.append('csvFile', csvFile);
+        uploads.push(
+          fetch('/api/upload-csv', {
+            method: 'POST',
+            body: csvFormData,
+            credentials: 'include',
+          })
+        );
+      }
+
+      const responses = await Promise.all(uploads);
+      const excelResponse = responses[0];
+      const csvResponse = csvFile ? responses[1] : null;
 
       if (!excelResponse.ok) {
         throw new Error('Excel upload failed');
       }
-
       const excelResult = await excelResponse.json();
 
-      // Upload CSV file if provided
-      if (csvFile) {
-        const csvFormData = new FormData();
-        csvFormData.append('csvFile', csvFile);
-
-        const csvResponse = await fetch('/api/upload-csv', {
-          method: 'POST',
-          body: csvFormData,
-        });
-
-        if (!csvResponse.ok) {
-          console.warn('CSV upload failed, but Excel was uploaded successfully');
-        } else {
-          console.log('Both Excel and CSV files uploaded successfully');
-        }
+      if (csvResponse && !csvResponse.ok) {
+        console.warn('CSV upload failed, but Excel was uploaded successfully');
       }
 
-      // Navigate to dashboard regardless of CSV upload status
-      router.push(`/dashboard/${excelResult.id}`);
+      router.push(`/dashboard/${excelResult.id}?source=upload`);
     } catch (err) {
       setError('Failed to upload files. Please try again.');
       console.error('Upload error:', err);
@@ -147,6 +150,13 @@ export default function UploadPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
+        <Link
+          href="/batches"
+          className="inline-flex items-center gap-2 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors mb-6"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back to batches
+        </Link>
         <div className="text-center mb-8">
           <div className="mx-auto w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mb-4">
             <FileSpreadsheet className="w-8 h-8 text-blue-600" />

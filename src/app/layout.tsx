@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { ClerkProvider, Show, UserButton } from "@clerk/nextjs";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
+import { AdminNavLink } from "@/components/admin-nav-link";
 import "./globals.css";
 
 const inter = Inter({
@@ -29,14 +30,19 @@ export default async function RootLayout({
       <body
         className={`${inter.variable} ${jetbrainsMono.variable} antialiased`}
       >
-        <ClerkProvider>
+        <ClerkProvider afterSignOutUrl="/sign-in">
           <header className="flex items-center justify-between gap-3 border-b border-gray-200 bg-white px-4 py-3">
             <span className="text-sm font-semibold text-gray-900">
               Camera Trap AI
             </span>
-            <Show when="signed-in">
-              <UserButton />
-            </Show>
+            <div className="flex items-center gap-3">
+              <Show when="signed-in">
+                <AdminNavLink />
+              </Show>
+              <Show when="signed-in">
+                <UserButton />
+              </Show>
+            </div>
           </header>
           {children}
         </ClerkProvider>

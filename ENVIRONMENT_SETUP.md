@@ -41,6 +41,9 @@ GOOGLE_APPLICATION_CREDENTIALS=./path/to/your/gcp-service-account.json
 # Default GCP Storage bucket for images
 GCP_DEFAULT_BUCKET=your-default-gcp-bucket-name
 
+# Admin dashboard at /admin — comma-separated Clerk user IDs (Dashboard → Users → copy User ID)
+ADMIN_USER_IDS=user_xxxxxxxxxxxxxxxxxxxxxxxx
+
 
 
 
@@ -58,7 +61,16 @@ MONGODB_URI=mongodb://localhost:27017/camera-trap-ai-gui
 MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/camera-trap-ai-gui
 ```
 
-### 2. Google Cloud Platform (GCP) Setup
+### 2. Admin dashboard (`/admin`)
+
+1. In [Clerk Dashboard](https://dashboard.clerk.com/) → **Users**, open your account and copy **User ID** (starts with `user_`).
+2. Add to `.env.local`:
+   ```bash
+   ADMIN_USER_IDS=user_abc123,user_def456
+   ```
+3. Restart the dev server. Signed-in users whose ID is listed will see **Admin** in the header and can list all Clerk users, delete users (except themselves), and view or delete any MongoDB upload.
+
+### 3. Google Cloud Platform (GCP) Setup
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
 2. Create a new project or select existing one

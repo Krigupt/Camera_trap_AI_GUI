@@ -4,6 +4,10 @@ export interface IExcelData extends Document {
   filename: string;
   sheetName: string;
   bucketName: string; // GCP bucket name for images
+  /** Clerk user id — scopes uploads to the signed-in user */
+  clerkUserId?: string;
+  /** One id per Excel upload — all sheets from the same file share this */
+  uploadGroupId?: string;
   data: Array<{
     human: string;
     ai: string;
@@ -31,6 +35,14 @@ const ExcelDataSchema: Schema = new Schema({
   bucketName: {
     type: String,
     required: true,
+  },
+  clerkUserId: {
+    type: String,
+    index: true,
+  },
+  uploadGroupId: {
+    type: String,
+    index: true,
   },
   data: [{
     human: String,

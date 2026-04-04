@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { ImageIcon, TagIcon, DownloadIcon, ArrowLeft } from 'lucide-react';
 
 interface ExcelData {
@@ -77,20 +77,25 @@ const getImagePaths = (row: ExcelData['data'][0] | undefined | null): string[] =
 };
 
 // Fetch with timeout so serverless timeouts (e.g. Vercel "---") surface as errors
-const fetchWithTimeout = (url: string, options: RequestInit, timeoutMs = 25000): Promise<Response> => {
+const fetchWithTimeout = (url: string, options: RequestInit = {}, timeoutMs = 25000): Promise<Response> => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timeout));
+  return fetch(url, {
+    ...options,
+    credentials: 'include',
+    signal: controller.signal,
+  }).finally(() => clearTimeout(timeout));
 };
 
 // Navbar component to avoid duplication
-const Navbar = ({ selectedSheet, sheets, onSheetChange, onExport, isExporting, onBack }: {
+const Navbar = ({ selectedSheet, sheets, onSheetChange, onExport, isExporting, onBack, backLabel }: {
   selectedSheet: string;
   sheets: Sheet[];
   onSheetChange: (sheetId: string) => void;
   onExport: () => void;
   isExporting: boolean;
   onBack: () => void;
+  backLabel: string;
 }) => (
   <nav className="bg-white shadow-sm border-b">
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -101,7 +106,7 @@ const Navbar = ({ selectedSheet, sheets, onSheetChange, onExport, isExporting, o
             className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />
-            <span>Back to Upload</span>
+            <span>{backLabel}</span>
           </button>
           <h1 className="text-xl font-semibold text-gray-900">Excel Data Dashboard</h1>
         </div>
@@ -261,9 +266,12 @@ const ImageDisplay = ({
   );
 };
 
-export default function DashboardPage() {
+function DashboardPageInner() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const backPath = searchParams.get('source') === 'admin' ? '/admin' : '/batches';
+  const backLabel = searchParams.get('source') === 'admin' ? 'Back to admin' : 'Back to batches';
   const [excelData, setExcelData] = useState<ExcelData | null>(null);
   const [sheets, setSheets] = useState<Sheet[]>([]);
   const [selectedSheet, setSelectedSheet] = useState<string>('');
@@ -299,7 +307,7 @@ export default function DashboardPage() {
   // Fetch sheet-specific image tags
   const fetchSheetTags = useCallback(async (filename: string, sheetName: string) => {
     try {
-      const response = await fetch(`/api/global-tags?filename=${encodeURIComponent(filename)}&sheetName=${encodeURIComponent(sheetName)}`, { cache: 'no-store' });
+      const response = await fetch(`/api/global-tags?filename=${encodeURIComponent(filename)}&sheetName=${encodeURIComponent(sheetName)}`, { cache: 'no-store', credentials: 'include' });
       if (response.ok) {
         const data = await response.json();
         const tags = data.sheetImageTags || {};
@@ -321,7 +329,7 @@ export default function DashboardPage() {
   // Fetch global image species
   const fetchGlobalSpecies = useCallback(async (filename: string) => {
     try {
-      const response = await fetch(`/api/global-species?filename=${encodeURIComponent(filename)}`, { cache: 'no-store' });
+      const response = await fetch(`/api/global-species?filename=${encodeURIComponent(filename)}`, { cache: 'no-store', credentials: 'include' });
       if (response.ok) {
         const data = await response.json();
         const species = data.globalImageSpecies || {};
@@ -336,14 +344,29 @@ export default function DashboardPage() {
   // Fetch initial data and sheets
   const fetchData = useCallback(async () => {
     try {
-      const response = await fetch(`/api/data/${params.id}`);
+      const response = await fetch(`/api/data/${params.id}`, {
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          router.replace(backPath);
+        }
+        return;
+      }
       const data = await response.json();
-      
+
       // Fetch global species (no need to fetch tags here yet, we'll fetch when sheet is selected)
       await fetchGlobalSpecies(data.filename);
-      
+
       const encodedFilename = encodeURIComponent(data.filename);
-      const sheetsResponse = await fetch(`/api/sheets/${encodedFilename}`);
+      const sheetsResponse = await fetch(
+        `/api/sheets/${encodedFilename}?batchId=${params.id}`,
+        { credentials: 'include' }
+      );
+      if (!sheetsResponse.ok) {
+        console.error('Failed to load sheets:', sheetsResponse.status);
+        return;
+      }
       const sheetsData = await sheetsResponse.json();
       
       // Remove duplicate sheet names
@@ -359,7 +382,7 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [params.id, fetchGlobalSpecies]);
+  }, [params.id, fetchGlobalSpecies, router, backPath]);
 
   // Handle sheet change
   const handleSheetChange = useCallback(async (sheetId: string) => {
@@ -374,7 +397,10 @@ export default function DashboardPage() {
       // Update selected sheet immediately
       setSelectedSheet(selectedSheetData.sheetName);
       
-      const response = await fetch(`/api/data/${sheetId}`);
+      const response = await fetch(`/api/data/${sheetId}`, {
+        credentials: 'include',
+      });
+      if (!response.ok) return;
       const data = await response.json();
       
       setExcelData(data);
@@ -738,9 +764,9 @@ export default function DashboardPage() {
   }, [excelData]);
 
   // Handle download with selected options
-  const handleBackToUpload = useCallback(() => {
-    router.push('/upload');
-  }, [router]);
+  const handleBackToBatches = useCallback(() => {
+    router.push(backPath);
+  }, [router, backPath]);
 
   const handleDownloadWithOptions = useCallback(async () => {
     if (!excelData) return;
@@ -756,6 +782,7 @@ export default function DashboardPage() {
         const response = await fetch('/api/export-tags', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
           body: JSON.stringify({ filename: excelData.filename }),
         });
         
@@ -775,7 +802,7 @@ export default function DashboardPage() {
       
       // Download updated CSV if selected
       if (downloadOptions.updatedCsv) {
-        const response = await fetch('/api/download-csv');
+        const response = await fetch('/api/download-csv', { credentials: 'include' });
         
         if (response.ok) {
           const blob = await response.blob();
@@ -793,7 +820,9 @@ export default function DashboardPage() {
       
       // Download original data if selected
       if (downloadOptions.originalData) {
-        const response = await fetch(`/api/download-original/${excelData._id}`);
+        const response = await fetch(`/api/download-original/${excelData._id}`, {
+          credentials: 'include',
+        });
         
         if (response.ok) {
           const blob = await response.blob();
@@ -890,7 +919,8 @@ export default function DashboardPage() {
           onSheetChange={handleSheetChange}
           onExport={handleExportTaggedData}
           isExporting={isExporting}
-          onBack={handleBackToUpload}
+          onBack={handleBackToBatches}
+          backLabel={backLabel}
         />
         <div className="flex items-center justify-center min-h-[calc(100vh-64px)]">
           <div className="text-center">
@@ -913,7 +943,8 @@ export default function DashboardPage() {
         onSheetChange={handleSheetChange}
         onExport={handleExportTaggedData}
         isExporting={isExporting}
-        onBack={handleBackToUpload}
+        onBack={handleBackToBatches}
+        backLabel={backLabel}
       />
 
       <div className="flex">
@@ -1196,5 +1227,19 @@ export default function DashboardPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600" />
+        </div>
+      }
+    >
+      <DashboardPageInner />
+    </Suspense>
   );
 }

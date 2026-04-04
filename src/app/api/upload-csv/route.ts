@@ -2,6 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/mongodb';
 import CsvData from '@/models/CsvData';
 
+/** Keeps each insert under typical serverless / driver limits; avoids one giant round-trip. */
+const INSERT_CHUNK_SIZE = 5000;
+
+async function insertCsvChunks(rows: Record<string, string>[]) {
+  for (let i = 0; i < rows.length; i += INSERT_CHUNK_SIZE) {
+    const chunk = rows.slice(i, i + INSERT_CHUNK_SIZE);
+    await CsvData.insertMany(chunk, { ordered: false });
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     await connectDB();
@@ -31,11 +41,13 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Clear existing CSV data
-    await CsvData.deleteMany({});
+    // Clear existing CSV data — drop is much faster than deleteMany on large collections
+    await CsvData.collection.drop().catch((err: { code?: number; codeName?: string }) => {
+      if (err.code !== 26 && err.codeName !== 'NamespaceNotFound') throw err;
+    });
 
     // Parse and save CSV data to MongoDB
-    const csvDataArray = [];
+    const csvDataArray: Record<string, string>[] = [];
     for (let i = 1; i < lines.length; i++) {
       const values = lines[i].split(',').map(v => v.trim());
       if (values.length >= headers.length) {
@@ -53,8 +65,9 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Save all records to MongoDB
-    await CsvData.insertMany(csvDataArray);
+    if (csvDataArray.length > 0) {
+      await insertCsvChunks(csvDataArray);
+    }
 
     return NextResponse.json({
       success: true,
