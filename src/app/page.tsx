@@ -1,18 +1,8 @@
-'use client';
+import { auth } from "@clerk/nextjs/server";
+import { redirect } from "next/navigation";
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-
-export default function Home() {
-  const router = useRouter();
-
-  useEffect(() => {
-    router.push('/upload');
-  }, [router]);
-
-  return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-    </div>
-  );
+export default async function Home() {
+  const { userId } = await auth();
+  if (userId) redirect("/upload");
+  redirect("/sign-in");
 }

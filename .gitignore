@@ -40,3 +40,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 dental-ai-447704-a0fd0f639b46.json
+
+# clerk configuration (can include secrets)
+/.clerk/

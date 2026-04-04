@@ -9,12 +9,13 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@clerk/nextjs": "^7.0.8",
     "@google-cloud/storage": "^7.17.1",
     "@vercel/analytics": "^1.6.1",
     "dotenv": "^17.2.3",
     "lucide-react": "^0.400.0",
     "mongoose": "^8.0.0",
-    "next": "15.0.7",
+    "next": "^15.2.8",
     "react": "18.2.0",
     "react-dom": "18.2.0",
     "xlsx": "^0.18.5"

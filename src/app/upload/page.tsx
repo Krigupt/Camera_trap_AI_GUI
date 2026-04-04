@@ -12,22 +12,49 @@ export default function UploadPage() {
   const [selectedBucket, setSelectedBucket] = useState<string>('');
   const [buckets, setBuckets] = useState<Array<{name: string, location: string}>>([]);
   const [loadingBuckets, setLoadingBuckets] = useState(false);
+  const [bucketLoadMessage, setBucketLoadMessage] = useState<string | null>(null);
   const router = useRouter();
 
-  // Fetch GCP buckets on component mount
+  // Fetch GCP buckets on component mount (needs session cookie for protected API)
   useEffect(() => {
     const fetchBuckets = async () => {
       setLoadingBuckets(true);
+      setBucketLoadMessage(null);
       try {
-        const response = await fetch('/api/gcp-buckets');
-        const data = await response.json();
-        if (data.success) {
+        const response = await fetch('/api/gcp-buckets', {
+          credentials: 'include',
+        });
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          if (response.status === 401 || response.status === 404) {
+            setError(
+              'Could not load buckets (session). Refresh the page or sign in again.'
+            );
+          } else {
+            setError(
+              data.error ||
+                'Failed to load GCP buckets. Check server logs and GCP credentials.'
+            );
+          }
+          setBuckets([]);
+          return;
+        }
+
+        if (data.success && Array.isArray(data.buckets)) {
           setBuckets(data.buckets);
+          if (data.buckets.length === 0) {
+            setBucketLoadMessage(
+              'No buckets found in this GCP project. Create a bucket in Google Cloud Console or grant this service account Storage Admin / storage.buckets.list.'
+            );
+          }
         } else {
           setError('Failed to load GCP buckets. Please check your credentials.');
+          setBuckets([]);
         }
-      } catch (err) {
+      } catch {
         setError('Failed to connect to GCP. Please check your credentials.');
+        setBuckets([]);
       } finally {
         setLoadingBuckets(false);
       }
@@ -174,8 +201,13 @@ export default function UploadPage() {
                   </option>
                 ))}
               </select>
-              <Cloud className="absolute right-3 top-2.5 w-5 h-5 text-gray-400" />
+              <Cloud className="absolute right-3 top-2.5 w-5 h-5 text-gray-400 pointer-events-none" />
             </div>
+            {bucketLoadMessage && !error && (
+              <p className="mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2">
+                {bucketLoadMessage}
+              </p>
+            )}
             {selectedBucket && (
               <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
                 <div className="flex items-center">
@@ -219,7 +251,7 @@ export default function UploadPage() {
 
           <button
             onClick={handleUpload}
-            disabled={!file || isUploading}
+            disabled={!file || !selectedBucket || isUploading}
             className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
           >
             {isUploading ? (
