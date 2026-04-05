@@ -106,36 +106,29 @@ export default function UploadPage() {
       excelFormData.append('file', file);
       excelFormData.append('bucketName', selectedBucket);
 
-      const excelPromise = fetch('/api/upload', {
+      const excelResponse = await fetch('/api/upload', {
         method: 'POST',
         body: excelFormData,
         credentials: 'include',
       });
-
-      const uploads: Promise<Response>[] = [excelPromise];
-      if (csvFile) {
-        const csvFormData = new FormData();
-        csvFormData.append('csvFile', csvFile);
-        uploads.push(
-          fetch('/api/upload-csv', {
-            method: 'POST',
-            body: csvFormData,
-            credentials: 'include',
-          })
-        );
-      }
-
-      const responses = await Promise.all(uploads);
-      const excelResponse = responses[0];
-      const csvResponse = csvFile ? responses[1] : null;
 
       if (!excelResponse.ok) {
         throw new Error('Excel upload failed');
       }
       const excelResult = await excelResponse.json();
 
-      if (csvResponse && !csvResponse.ok) {
-        console.warn('CSV upload failed, but Excel was uploaded successfully');
+      if (csvFile && excelResult.uploadGroupId) {
+        const csvFormData = new FormData();
+        csvFormData.append('csvFile', csvFile);
+        csvFormData.append('uploadGroupId', excelResult.uploadGroupId);
+        const csvResponse = await fetch('/api/upload-csv', {
+          method: 'POST',
+          body: csvFormData,
+          credentials: 'include',
+        });
+        if (!csvResponse.ok) {
+          console.warn('CSV upload failed, but Excel was uploaded successfully');
+        }
       }
 
       router.push(`/dashboard/${excelResult.id}?source=upload`);

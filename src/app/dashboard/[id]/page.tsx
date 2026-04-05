@@ -9,6 +9,8 @@ interface ExcelData {
   filename: string;
   sheetName: string;
   bucketName: string;
+  /** Present for uploads after uploadGroupId rollout — scopes CSV rows */
+  uploadGroupId?: string;
   data: Array<{
     human: string;
     ai: string;
@@ -655,6 +657,7 @@ function DashboardPageInner() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
+          excelSheetId: excelData._id,
           filename: excelData.filename,
           sheetName: excelData.sheetName,
           imagePath,
@@ -775,7 +778,18 @@ function DashboardPageInner() {
     setShowDownloadOptions(false);
     
     try {
-      const downloads = [];
+      const downloads: string[] = [];
+      const failures: string[] = [];
+
+      const readApiError = async (response: Response) => {
+        const ct = response.headers.get('Content-Type') || '';
+        if (ct.includes('application/json')) {
+          const data = await response.json().catch(() => ({}));
+          return (data as { error?: string }).error || response.statusText;
+        }
+        const text = await response.text();
+        return text.slice(0, 200) || response.statusText;
+      };
       
       // Download tagged Excel if selected
       if (downloadOptions.taggedExcel) {
@@ -797,24 +811,33 @@ function DashboardPageInner() {
           document.body.removeChild(a);
           window.URL.revokeObjectURL(url);
           downloads.push('Tagged Excel');
+        } else {
+          failures.push(`Tagged Excel: ${await readApiError(response)}`);
         }
       }
       
       // Download updated CSV if selected
       if (downloadOptions.updatedCsv) {
-        const response = await fetch('/api/download-csv', { credentials: 'include' });
+        const response = await fetch(
+          `/api/download-csv?batchId=${encodeURIComponent(String(excelData._id))}`,
+          { credentials: 'include' }
+        );
         
         if (response.ok) {
           const blob = await response.blob();
           const url = window.URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
-          a.download = 'updated_species_data.csv';
+          const cd = response.headers.get('Content-Disposition');
+          const filenameMatch = cd?.match(/filename="([^"]+)"/);
+          a.download = filenameMatch?.[1] ?? 'updated_species_data.csv';
           document.body.appendChild(a);
           a.click();
           document.body.removeChild(a);
           window.URL.revokeObjectURL(url);
           downloads.push('Updated CSV');
+        } else {
+          failures.push(`Updated CSV: ${await readApiError(response)}`);
         }
       }
       
@@ -835,13 +858,30 @@ function DashboardPageInner() {
           document.body.removeChild(a);
           window.URL.revokeObjectURL(url);
           downloads.push('Original Data');
+        } else {
+          failures.push(`Original Excel: ${await readApiError(response)}`);
         }
       }
       
-      if (downloads.length > 0) {
-        alert(`Downloaded: ${downloads.join(', ')}`);
-      } else {
+      const wanted =
+        downloadOptions.taggedExcel ||
+        downloadOptions.updatedCsv ||
+        downloadOptions.originalData;
+
+      if (!wanted) {
         alert('No files selected for download');
+      } else if (downloads.length > 0 && failures.length === 0) {
+        alert(`Downloaded: ${downloads.join(', ')}`);
+      } else if (downloads.length > 0 && failures.length > 0) {
+        alert(
+          `Downloaded: ${downloads.join(', ')}\n\nCould not complete:\n${failures.join('\n')}`
+        );
+      } else {
+        alert(
+          failures.length > 0
+            ? failures.join('\n\n')
+            : 'Download failed. Please try again.'
+        );
       }
       
     } catch (error) {

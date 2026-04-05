@@ -9,89 +9,97 @@ export const maxDuration = 30;
 export async function PUT(request: NextRequest) {
   try {
     await connectDB();
-    
-    const { filename, sheetName, imagePath, species } = await request.json();
 
-    if (!filename || !sheetName || !imagePath || species === undefined) {
-      return NextResponse.json({ 
-        error: 'Missing required fields: filename, sheetName, imagePath, species' 
-      }, { status: 400 });
+    const body = await request.json();
+    const {
+      excelSheetId,
+      filename,
+      sheetName,
+      imagePath,
+      species,
+    } = body as {
+      excelSheetId?: string;
+      filename?: string;
+      sheetName?: string;
+      imagePath?: string;
+      species?: unknown;
+    };
+
+    if (!excelSheetId || !filename || !sheetName || !imagePath || species === undefined) {
+      return NextResponse.json(
+        {
+          error:
+            'Missing required fields: excelSheetId, filename, sheetName, imagePath, species',
+        },
+        { status: 400 }
+      );
     }
 
-    // Handle clearing or cleaning species string
     const isClearing = species === '' || species === 'CLEAR_SELECTION';
-    const cleanSpecies = isClearing ? '' : species.replace(/‚Äî/g, '-').replace(/—/g, '-');
-    
+    const cleanSpecies = isClearing
+      ? ''
+      : String(species).replace(/‚Äî/g, '-').replace(/—/g, '-');
 
-    // Find the Excel data document
-    const excelDataDoc = await ExcelData.findOne({ filename, sheetName });
-    
-    if (!excelDataDoc) {
-      return NextResponse.json({ 
-        error: 'Excel data not found' 
-      }, { status: 404 });
+    const excelDataDoc = await ExcelData.findById(excelSheetId);
+    if (
+      !excelDataDoc ||
+      excelDataDoc.filename !== filename ||
+      excelDataDoc.sheetName !== sheetName
+    ) {
+      return NextResponse.json({ error: 'Excel data not found' }, { status: 404 });
     }
 
-    // Extract the image filename from the path
     const imageFilename = path.basename(imagePath);
-    
-    // Update the CSV data in MongoDB
+
     try {
-      // Find the CSV record that matches the image filename
-      const csvRecord = await CsvData.findOne({ filename: imageFilename });
-      
+      const uploadGroupId = excelDataDoc.uploadGroupId;
+      const csvQuery = uploadGroupId
+        ? { filename: imageFilename, uploadGroupId }
+        : { filename: imageFilename };
+
+      const csvRecord = await CsvData.findOne(csvQuery);
+
       if (csvRecord) {
-        // Map taxonomic levels to CSV columns
         const taxonomicLevels = {
-          'class': 'class',
-          'order': 'order', 
-          'family': 'family',
-          'genus': 'genus',
-          'species': 'species',
-          'common_name': 'common_name'
+          class: 'class',
+          order: 'order',
+          family: 'family',
+          genus: 'genus',
+          species: 'species',
+          common_name: 'common_name',
         };
-        
-        // Find which taxonomic level we're working with
-        const currentLevel = Object.keys(taxonomicLevels).find(level => 
+
+        const currentLevel = Object.keys(taxonomicLevels).find((level) =>
           sheetName.toLowerCase().includes(level.toLowerCase())
         );
-        
+
         if (currentLevel && taxonomicLevels[currentLevel as keyof typeof taxonomicLevels]) {
           const fieldToUpdate = taxonomicLevels[currentLevel as keyof typeof taxonomicLevels];
-          
+
           if (isClearing) {
-            // Clear the species classification
-            csvRecord[fieldToUpdate] = '';
+            (csvRecord as Record<string, unknown>)[fieldToUpdate] = '';
           } else {
-            // Update with the cleaned species classification
-            csvRecord[fieldToUpdate] = cleanSpecies;
+            (csvRecord as Record<string, unknown>)[fieldToUpdate] = cleanSpecies;
           }
-          
+
           await csvRecord.save();
-          console.log(`CSV record updated: ${imageFilename} -> ${fieldToUpdate} = ${cleanSpecies}`);
-        } else {
-          console.log(`No matching taxonomic level found for sheet: ${sheetName}`);
         }
-      } else {
-        console.log(`No CSV record found for image: ${imageFilename}`);
       }
-      
     } catch (csvError) {
       console.error('Error updating CSV data in MongoDB:', csvError);
-      // Continue with database update even if CSV update fails
     }
 
-    return NextResponse.json({ 
-      success: true, 
+    return NextResponse.json({
+      success: true,
       message: 'Species classification updated successfully',
       updatedImage: imageFilename,
-      species: cleanSpecies
+      species: cleanSpecies,
     });
-    
   } catch (error) {
     console.error('Error updating species classification:', error);
-    return NextResponse.json({ 
-      error: 'Failed to update species classification' 
-    }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Failed to update species classification' },
+      { status: 500 }
+    );
   }
 }

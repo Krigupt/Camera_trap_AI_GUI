@@ -1,6 +1,8 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ICsvData extends Document {
+  /** Same as ExcelData.uploadGroupId for this upload session */
+  uploadGroupId?: string;
   deployment_id: string;
   filename: string;
   class: string;
@@ -13,6 +15,10 @@ export interface ICsvData extends Document {
 }
 
 const CsvDataSchema: Schema = new Schema({
+  uploadGroupId: {
+    type: String,
+    index: true,
+  },
   deployment_id: {
     type: String,
     required: true,

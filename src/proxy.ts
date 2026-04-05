@@ -8,6 +8,7 @@ const isProtectedRoute = createRouteMatcher([
   "/api/gcp-buckets(.*)",
   "/api/upload(.*)",
   "/api/upload-csv(.*)",
+  "/api/download-csv(.*)",
   "/api/my-batches(.*)",
   "/api/excel-batch(.*)",
   "/api/admin(.*)",

@@ -123,6 +123,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       id: inserted[0]._id,
+      uploadGroupId,
       sheets: inserted.map((doc) => ({
         id: doc._id,
         sheetName: doc.sheetName,
