@@ -89,6 +89,87 @@ function inferDeploymentIdFromImageBasename(basename: string): string {
   return base;
 }
 
+const FULLWIDTH_DOT = '\uff0e';
+
+/**
+ * Resolve species for export: Mongo keys use fullwidth dots (same as /api/global-species PUT).
+ * Also match by basename when the stored key is a full path.
+ */
+function lookupGlobalSpecies(
+  speciesByPath: Record<string, string>,
+  rawPath: string,
+  bn: string
+): string {
+  const normPath = rawPath.replace(/\\/g, '/').trim();
+  const base =
+    (bn || normPath.replace(/^.*\//, '')).trim();
+  if (!normPath && !base) return '';
+
+  const direct = (pathKey: string) => {
+    if (!pathKey) return '';
+    const escaped = pathKey.replace(/\./g, FULLWIDTH_DOT);
+    return (
+      speciesByPath[pathKey] ||
+      speciesByPath[escaped] ||
+      ''
+    );
+  };
+
+  let v = direct(normPath);
+  if (v) return v.trim();
+  v = direct(base);
+  if (v) return v.trim();
+
+  if (base) {
+    const escBase = base.replace(/\./g, FULLWIDTH_DOT);
+    v = speciesByPath[base] || speciesByPath[escBase] || '';
+    if (v) return v.trim();
+  }
+
+  for (const key of Object.keys(speciesByPath)) {
+    const val = speciesByPath[key];
+    if (val == null || String(val).trim() === '') continue;
+    const unescaped = key.replaceAll(FULLWIDTH_DOT, '.');
+    const keyBase = unescaped.replace(/^.*\//, '');
+    if (
+      unescaped === normPath ||
+      unescaped.endsWith('/' + base) ||
+      keyBase === base
+    ) {
+      return String(val).trim();
+    }
+  }
+
+  return '';
+}
+
+/** Merge globalImageSpecies from every sheet doc in this upload so tags are not missed. */
+async function mergedGlobalSpeciesForBatch(
+  excelDoc: InstanceType<typeof ExcelData>
+): Promise<Record<string, string>> {
+  const merged: Record<string, string> = {};
+  const mergeIn = (g: Record<string, string> | undefined | null) => {
+    if (!g || typeof g !== 'object') return;
+    for (const [k, v] of Object.entries(g)) {
+      if (v != null && String(v).trim() !== '') merged[k] = String(v).trim();
+    }
+  };
+
+  const uid = excelDoc.uploadGroupId;
+  if (uid) {
+    const siblings = await ExcelData.find({ uploadGroupId: uid }).select(
+      'globalImageSpecies'
+    );
+    for (const s of siblings) {
+      mergeIn(s.globalImageSpecies as Record<string, string>);
+    }
+    return merged;
+  }
+
+  mergeIn(excelDoc.globalImageSpecies as Record<string, string>);
+  return merged;
+}
+
 /**
  * Map dashboard sheet name to CSV taxonomic columns (same idea as update-species).
  */
@@ -145,9 +226,11 @@ function taxoColumnsForSheet(
 /**
  * When Mongo has no CsvData for this batch, build a CSV from the Excel sheet
  * (image paths + optional globalImageSpecies) so export still works.
+ * `speciesByPath` should be the merged map from mergedGlobalSpeciesForBatch().
  */
 function generateCsvFromExcelDocument(
-  excelDoc: InstanceType<typeof ExcelData>
+  excelDoc: InstanceType<typeof ExcelData>,
+  speciesByPath: Record<string, string>
 ): string {
   const headers = [
     'deployment_id',
@@ -160,8 +243,6 @@ function generateCsvFromExcelDocument(
     'common_name',
   ];
   const lines: string[] = [headers.join(',')];
-  const speciesByPath =
-    (excelDoc.globalImageSpecies as Record<string, string> | undefined) || {};
   const sheetName = excelDoc.sheetName || '';
 
   const imagePathsForRow = (row: {
@@ -183,8 +264,7 @@ function generateCsvFromExcelDocument(
       const bn = rawPath.replace(/^.*\//, '').trim();
       if (!bn) continue;
       const deployment_id = inferDeploymentIdFromImageBasename(bn);
-      const speciesVal =
-        speciesByPath[rawPath] ?? speciesByPath[bn] ?? '';
+      const speciesVal = lookupGlobalSpecies(speciesByPath, rawPath, bn);
       const tax = taxoColumnsForSheet(
         sheetName,
         (row.human || '').trim(),
@@ -282,7 +362,8 @@ export async function GET(request: NextRequest) {
     let fromMongo = true;
 
     if (csvData.length === 0) {
-      const synthetic = generateCsvFromExcelDocument(excelDoc);
+      const mergedSpecies = await mergedGlobalSpeciesForBatch(excelDoc);
+      const synthetic = generateCsvFromExcelDocument(excelDoc, mergedSpecies);
       if (!synthetic) {
         return NextResponse.json(
           {

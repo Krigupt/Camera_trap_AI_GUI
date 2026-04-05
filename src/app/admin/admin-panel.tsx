@@ -12,7 +12,7 @@ import {
   ExternalLink,
   Shield,
 } from "lucide-react";
-import type { GroupedBatch } from "@/lib/group-excel-batches";
+import type { AdminListBatch } from "@/lib/group-excel-batches";
 
 export type AdminUserRow = {
   id: string;
@@ -28,7 +28,7 @@ export function AdminPanel({
   currentUserId,
 }: {
   users: AdminUserRow[];
-  batches: GroupedBatch[];
+  batches: AdminListBatch[];
   currentUserId: string;
 }) {
   const router = useRouter();
@@ -166,8 +166,9 @@ export function AdminPanel({
           All uploads (MongoDB)
         </h2>
         <p className="text-sm text-gray-600 mb-4">
-          Every grouped Excel upload in the database. Open uses the same
-          tagging workspace as your batches page.
+          One row per file, bucket, and owner (latest upload). Older re-uploads
+          of the same file stay in MongoDB with their tags until deleted; Open
+          targets the newest upload only.
         </p>
         <ul className="space-y-3">
           {batches.length === 0 ? (
@@ -206,6 +207,14 @@ export function AdminPanel({
                         ? new Date(b.uploadedAt).toLocaleString()
                         : "—"}
                     </p>
+                    {b.olderVersionsHidden > 0 ? (
+                      <p className="text-xs text-amber-800/90 mt-1.5">
+                        Latest of {b.olderVersionsHidden + 1} uploads —{" "}
+                        {b.olderVersionsHidden} older version
+                        {b.olderVersionsHidden === 1 ? "" : "s"} still in the
+                        database (not shown).
+                      </p>
+                    ) : null}
                   </div>
                   <ExternalLink className="w-4 h-4 text-blue-500 shrink-0 self-center" />
                 </Link>

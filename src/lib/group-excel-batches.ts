@@ -17,6 +17,11 @@ export type GroupedBatch = {
   clerkUserId: string | null;
 };
 
+/** Admin list row: one visible row per file+bucket+owner; older re-uploads stay in DB but are hidden from the list. */
+export type AdminListBatch = GroupedBatch & {
+  olderVersionsHidden: number;
+};
+
 /**
  * Groups Mongo Excel rows into one entry per upload.
  * @param includeOwnerInLegacyKey — use for all-users views so different owners never merge.
@@ -69,4 +74,50 @@ export function groupExcelBatches(
   });
 
   return grouped;
+}
+
+function dedupeKey(b: GroupedBatch): string {
+  const owner = b.clerkUserId ?? "legacy-no-user";
+  return `${owner}\0${b.filename}\0${b.bucketName}`;
+}
+
+/**
+ * Collapses multiple upload groups that share the same owner, filename, and bucket
+ * into a single row (the most recently uploaded). Older Mongo groups are unchanged;
+ * Open/Delete target only the latest group’s anchor.
+ */
+export function dedupeBatchesToLatestPerFile(
+  batches: GroupedBatch[]
+): AdminListBatch[] {
+  const byKey = new Map<string, GroupedBatch[]>();
+  for (const b of batches) {
+    const k = dedupeKey(b);
+    const list = byKey.get(k);
+    if (list) list.push(b);
+    else byKey.set(k, [b]);
+  }
+
+  const out: AdminListBatch[] = [];
+  for (const group of byKey.values()) {
+    const sorted = [...group].sort((a, b) => {
+      const ta = a.uploadedAt ? new Date(a.uploadedAt).getTime() : 0;
+      const tb = b.uploadedAt ? new Date(b.uploadedAt).getTime() : 0;
+      if (tb !== ta) return tb - ta;
+      return b.anchorId.localeCompare(a.anchorId);
+    });
+    const latest = sorted[0];
+    out.push({
+      ...latest,
+      olderVersionsHidden: sorted.length - 1,
+    });
+  }
+
+  out.sort((a, b) => {
+    const ta = a.uploadedAt ? new Date(a.uploadedAt).getTime() : 0;
+    const tb = b.uploadedAt ? new Date(b.uploadedAt).getTime() : 0;
+    if (tb !== ta) return tb - ta;
+    return b.anchorId.localeCompare(a.anchorId);
+  });
+
+  return out;
 }

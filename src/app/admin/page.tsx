@@ -5,6 +5,7 @@ import connectDB from "@/lib/mongodb";
 import ExcelData from "@/models/ExcelData";
 import { isAdminUserId } from "@/lib/admin";
 import {
+  dedupeBatchesToLatestPerFile,
   groupExcelBatches,
   type ExcelBatchLean,
 } from "@/lib/group-excel-batches";
@@ -37,9 +38,10 @@ export default async function AdminPage() {
     )
     .lean();
 
-  const batches = groupExcelBatches(
-    docs as unknown as ExcelBatchLean[],
-    { includeOwnerInLegacyKey: true }
+  const batches = dedupeBatchesToLatestPerFile(
+    groupExcelBatches(docs as unknown as ExcelBatchLean[], {
+      includeOwnerInLegacyKey: true,
+    })
   );
 
   return (
