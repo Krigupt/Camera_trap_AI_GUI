@@ -257,12 +257,20 @@ export function AdminHeader() {
           </p>
         </div>
       </div>
-      <Link
-        href="/batches"
-        className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-800 hover:bg-gray-50"
-      >
-        Back to app
-      </Link>
+      <div className="flex flex-wrap items-center gap-2 shrink-0">
+        <Link
+          href="/admin/master-sheet"
+          className="inline-flex items-center justify-center rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-medium text-indigo-800 hover:bg-indigo-100"
+        >
+          Master sheet
+        </Link>
+        <Link
+          href="/batches"
+          className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-800 hover:bg-gray-50"
+        >
+          Back to app
+        </Link>
+      </div>
     </div>
   );
 }
